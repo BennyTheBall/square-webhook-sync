@@ -22,6 +22,13 @@ export const logger = {
 
 function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack
+    };
+  }
   if (!value || typeof value !== "object") return value;
 
   const output = {};

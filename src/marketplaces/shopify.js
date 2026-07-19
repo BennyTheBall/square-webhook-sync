@@ -97,17 +97,17 @@ export async function findShopifyInventoryItem(store, db, skuRecord) {
   return data.productVariants?.edges?.[0]?.node?.inventoryItem?.id || null;
 }
 
-export async function activateInventoryAtLocation(store, db, inventoryItemId) {
+export async function activateInventoryAtLocation(store, db, inventoryItemId, idempotencyKey) {
   const data = await shopifyGraphql(
     store,
     db,
-    `mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!) {
+    `mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) @idempotent(idempotencyKey: $idempotencyKey) {
       inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
         inventoryLevel { id }
         userErrors { field message }
       }
     }`,
-    { inventoryItemId, locationId: store.locationId },
+    { inventoryItemId, locationId: store.locationId, idempotencyKey },
   );
 
   const errors = data.inventoryActivate?.userErrors || [];
@@ -119,11 +119,11 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId) {
   }
 }
 
-export async function setShopifyInventory(store, db, inventoryItemId, quantity) {
+export async function setShopifyInventory(store, db, inventoryItemId, quantity, idempotencyKey) {
   const data = await shopifyGraphql(
     store,
     db,
-    `mutation SetInventory($input: InventorySetQuantitiesInput!) {
+    `mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) @idempotent(idempotencyKey: $idempotencyKey) {
       inventorySetQuantities(input: $input) {
         inventoryAdjustmentGroup { createdAt reason }
         userErrors { field message }
@@ -142,6 +142,7 @@ export async function setShopifyInventory(store, db, inventoryItemId, quantity) 
           },
         ],
       },
+      idempotencyKey,
     },
   );
 
@@ -151,7 +152,7 @@ export async function setShopifyInventory(store, db, inventoryItemId, quantity) 
   }
 }
 
-export async function syncShopifyStore({ store, db, skuRecord, quantity }) {
+export async function syncShopifyStore({ store, db, skuRecord, quantity, eventId }) {
   if (!store.enabled) {
     return { status: 'skipped', message: 'Store disabled' };
   }
@@ -165,7 +166,8 @@ export async function syncShopifyStore({ store, db, skuRecord, quantity }) {
     return { status: 'skipped', message: 'Variant not found by barcode/SKU' };
   }
 
-  await activateInventoryAtLocation(store, db, inventoryItemId);
-  await setShopifyInventory(store, db, inventoryItemId, quantity);
+  const sku = skuRecord.SKU || skuRecord.Sku || skuRecord.ID || inventoryItemId;
+  await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate`);
+  await setShopifyInventory(store, db, inventoryItemId, quantity, `${eventId}:${store.key}:${sku}:set:${quantity}`);
   return { status: 'success', externalId: inventoryItemId };
 }

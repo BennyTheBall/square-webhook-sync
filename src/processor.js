@@ -63,7 +63,7 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
 
     for (const store of config.shopify.stores) {
       try {
-        const result = await syncShopifyStore({ store, db, skuRecord, quantity: count.quantity });
+        const result = await syncShopifyStore({ store, db, skuRecord, quantity: count.quantity, eventId });
         if (result.externalId && store.useLegacyShopifyIdColumn && !skuRecord.ShopifyID && typeof db.updateShopifyId === 'function') {
           await db.updateShopifyId({ skuRecord, shopifyId: result.externalId });
         }
