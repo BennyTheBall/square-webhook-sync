@@ -75,6 +75,8 @@ services:
         value: SKU_History
       - key: WEBHOOK_TABLE
         value: square_webhook_events
+      - key: WORKER_INTERVAL_MS
+        value: "60000"
       - key: SHOPIFY_STRAWBERRY_NAME
         value: The Strawberry Shop York
       - key: SHOPIFY_STRAWBERRY_DOMAIN

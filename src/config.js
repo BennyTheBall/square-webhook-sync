@@ -28,7 +28,8 @@ export function loadConfig() {
       webhook: process.env.WEBHOOK_TABLE || "square_webhook_events"
     },
     worker: {
-      limit: numberFromEnv("WORKER_LIMIT", 25)
+      limit: numberFromEnv("WORKER_LIMIT", 25),
+      intervalMs: numberFromEnv("WORKER_INTERVAL_MS", 60000)
     },
     shopify: {
       allStores: allShopifyStores,
