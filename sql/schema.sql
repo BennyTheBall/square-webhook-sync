@@ -16,13 +16,18 @@ CREATE TABLE IF NOT EXISTS square_inventory_sync_results (
   event_id VARCHAR(128) NOT NULL,
   sku VARCHAR(128) NULL,
   square_catalog_object_id VARCHAR(128) NULL,
+  item_name VARCHAR(255) NULL,
+  variant_name VARCHAR(255) NULL,
+  vendor VARCHAR(128) NULL,
+  quantity INT NULL,
   marketplace VARCHAR(64) NOT NULL,
   target VARCHAR(128) NULL,
   status ENUM('skipped','success','failed') NOT NULL,
   message TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_event_id (event_id),
-  INDEX idx_sku (sku)
+  INDEX idx_sku (sku),
+  INDEX idx_marketplace_created (marketplace, created_at)
 );
 
 CREATE TABLE IF NOT EXISTS shopify_store_tokens (

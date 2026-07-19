@@ -8,14 +8,62 @@ function getSkuCode(skuRecord) {
   return skuRecord.SKU || skuRecord.Sku || skuRecord.Code || skuRecord.Barcode || skuRecord.Token;
 }
 
+function getItemContext({ eventId, count, skuRecord, quantity, oldQuantity }) {
+  return {
+    eventId,
+    squareCatalogObjectId: count.catalogObjectId,
+    barcode: getSkuCode(skuRecord),
+    sku: getSkuCode(skuRecord),
+    itemName: skuRecord.ItemName || null,
+    variantName: skuRecord.VarName || null,
+    vendor: skuRecord.Vendor || null,
+    oldQuantity,
+    newQuantity: quantity,
+  };
+}
+
+function describeItem(context) {
+  return [
+    `barcode=${context.barcode || 'unknown'}`,
+    `item=${context.itemName || 'unknown item'}`,
+    context.variantName ? `variant=${context.variantName}` : null,
+    context.vendor ? `vendor=${context.vendor}` : null,
+    `quantity=${context.oldQuantity}->${context.newQuantity}`,
+  ].filter(Boolean).join(' | ');
+}
+
 function getCurrentQuantity(skuRecord) {
   return Number.parseInt(skuRecord.Quantity ?? skuRecord.quantity ?? '0', 10) || 0;
 }
 
-async function recordResult(db, result) {
+async function recordResult(db, result, context = {}) {
   if (typeof db.recordSyncResult === 'function') {
-    await db.recordSyncResult(result);
+    await db.recordSyncResult({
+      ...context,
+      ...result,
+      itemName: result.itemName ?? context.itemName,
+      variantName: result.variantName ?? context.variantName,
+      vendor: result.vendor ?? context.vendor,
+      quantity: result.quantity ?? context.newQuantity,
+    });
   }
+}
+
+function logSyncResult({ context, marketplace, status, target, message }) {
+  logger.info('Inventory sync result', {
+    eventId: context.eventId,
+    marketplace,
+    status,
+    target,
+    barcode: context.barcode,
+    squareCatalogObjectId: context.squareCatalogObjectId,
+    itemName: context.itemName,
+    variantName: context.variantName,
+    vendor: context.vendor,
+    oldQuantity: context.oldQuantity,
+    newQuantity: context.newQuantity,
+    message,
+  });
 }
 
 export async function processSquareEvent({ db, config, eventId, payload }) {
@@ -41,6 +89,12 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
 
     const sku = getSkuCode(skuRecord);
     const oldQuantity = getCurrentQuantity(skuRecord);
+    const context = getItemContext({ eventId, count, skuRecord, quantity: count.quantity, oldQuantity });
+
+    logger.info('Inventory sync item received', {
+      ...context,
+      description: describeItem(context),
+    });
 
     if (oldQuantity !== count.quantity) {
       await db.updateLocalQuantity({
@@ -51,6 +105,10 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
       });
     }
 
+    const localMessage = oldQuantity === count.quantity
+      ? `Database already current | ${describeItem(context)}`
+      : `Database updated | ${describeItem(context)}`;
+
     await recordResult(db, {
       eventId,
       catalogObjectId: count.catalogObjectId,
@@ -58,41 +116,48 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
       marketplace: 'local',
       status: 'success',
       quantity: count.quantity,
-      message: oldQuantity === count.quantity ? 'Already current' : `Updated from ${oldQuantity} to ${count.quantity}`,
-    });
+      message: localMessage,
+    }, context);
+    logSyncResult({ context, marketplace: 'database', status: 'success', message: localMessage });
 
     for (const store of config.shopify.stores) {
+      const marketplace = `shopify:${store.key}`;
       try {
         const result = await syncShopifyStore({ store, db, skuRecord, quantity: count.quantity, eventId });
         if (result.externalId && store.useLegacyShopifyIdColumn && !skuRecord.ShopifyID && typeof db.updateShopifyId === 'function') {
           await db.updateShopifyId({ skuRecord, shopifyId: result.externalId });
         }
+        const message = result.message || `${store.name || store.key} ${result.status} | ${describeItem(context)}`;
         await recordResult(db, {
           eventId,
           catalogObjectId: count.catalogObjectId,
           sku,
-          marketplace: `shopify:${store.key}`,
+          marketplace,
           status: result.status,
           quantity: count.quantity,
           externalId: result.externalId,
-          message: result.message,
-        });
+          message,
+        }, context);
+        logSyncResult({ context, marketplace, status: result.status, target: result.externalId, message });
       } catch (error) {
         failures.push(error);
+        const message = `${store.name || store.key} failed | ${describeItem(context)} | ${error.message}`;
         await recordResult(db, {
           eventId,
           catalogObjectId: count.catalogObjectId,
           sku,
-          marketplace: `shopify:${store.key}`,
+          marketplace,
           status: 'failed',
           quantity: count.quantity,
-          message: error.message,
-        });
+          message,
+        }, context);
+        logSyncResult({ context, marketplace, status: 'failed', message });
       }
     }
 
     try {
       const result = await syncWalmart({ config: config.walmart, skuRecord, quantity: count.quantity });
+      const message = result.message || `Walmart ${result.status} | ${describeItem(context)}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -101,10 +166,12 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         status: result.status,
         quantity: count.quantity,
         externalId: result.externalId,
-        message: result.message,
-      });
+        message,
+      }, context);
+      logSyncResult({ context, marketplace: 'walmart', status: result.status, target: result.externalId, message });
     } catch (error) {
       failures.push(error);
+      const message = `Walmart failed | ${describeItem(context)} | ${error.message}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -112,12 +179,14 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         marketplace: 'walmart',
         status: 'failed',
         quantity: count.quantity,
-        message: error.message,
-      });
+        message,
+      }, context);
+      logSyncResult({ context, marketplace: 'walmart', status: 'failed', message });
     }
 
     try {
       const result = await syncAmazon({ config: config.amazon, skuRecord, quantity: count.quantity });
+      const message = result.message || `Amazon ${result.status} | ${describeItem({ ...context, newQuantity: result.quantity ?? count.quantity })}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -126,10 +195,12 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         status: result.status,
         quantity: result.quantity ?? count.quantity,
         externalId: result.externalId,
-        message: result.message,
-      });
+        message,
+      }, { ...context, newQuantity: result.quantity ?? count.quantity });
+      logSyncResult({ context: { ...context, newQuantity: result.quantity ?? count.quantity }, marketplace: 'amazon', status: result.status, target: result.externalId, message });
     } catch (error) {
       failures.push(error);
+      const message = `Amazon failed | ${describeItem(context)} | ${error.message}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -137,8 +208,9 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         marketplace: 'amazon',
         status: 'failed',
         quantity: count.quantity,
-        message: error.message,
-      });
+        message,
+      }, context);
+      logSyncResult({ context, marketplace: 'amazon', status: 'failed', message });
     }
 
     processedCount += 1;

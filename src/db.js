@@ -38,6 +38,10 @@ export function createDb(config) {
         result.eventId,
         result.sku,
         result.catalogObjectId,
+        result.itemName,
+        result.variantName,
+        result.vendor,
+        result.quantity,
         result.marketplace,
         result.externalId || result.target || null,
         result.status,
@@ -171,16 +175,33 @@ export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, ch
   return { changed: true };
 }
 
-export async function recordSyncResult(db, eventId, sku, squareCatalogObjectId, marketplace, target, status, message) {
+export async function recordSyncResult(
+  db,
+  eventId,
+  sku,
+  squareCatalogObjectId,
+  itemName,
+  variantName,
+  vendor,
+  quantity,
+  marketplace,
+  target,
+  status,
+  message
+) {
   await db.execute(
     `INSERT INTO square_inventory_sync_results
-       (event_id, sku, square_catalog_object_id, marketplace, target, status, message)
+       (event_id, sku, square_catalog_object_id, item_name, variant_name, vendor, quantity, marketplace, target, status, message)
      VALUES
-       (:eventId, :sku, :squareCatalogObjectId, :marketplace, :target, :status, :message)`,
+       (:eventId, :sku, :squareCatalogObjectId, :itemName, :variantName, :vendor, :quantity, :marketplace, :target, :status, :message)`,
     {
       eventId,
       sku,
       squareCatalogObjectId,
+      itemName: itemName || null,
+      variantName: variantName || null,
+      vendor: vendor || null,
+      quantity: quantity ?? null,
       marketplace,
       target,
       status,
