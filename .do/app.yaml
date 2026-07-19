@@ -2,6 +2,10 @@ name: square-webhook-sync
 region: nyc
 services:
   - name: web
+    github:
+      repo: BennyTheBall/square-webhook-sync
+      branch: main
+      deploy_on_push: true
     dockerfile_path: Dockerfile
     source_dir: /
     http_port: 3000
@@ -64,12 +68,43 @@ services:
         type: SECRET
       - key: MYSQL_DATABASE
         value: Strawberry
+      - key: MYSQL_PORT
+        value: "3306"
+      - key: SKU_TABLE
+        value: SKU_Temp
+      - key: SKU_HISTORY_TABLE
+        value: SKU_History
+      - key: WEBHOOK_TABLE
+        value: square_webhook_events
+      - key: SHOPIFY_STRAWBERRY_NAME
+        value: The Strawberry Shop York
+      - key: SHOPIFY_STRAWBERRY_DOMAIN
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_STRAWBERRY_API_VERSION
+        value: "2026-07"
+      - key: SHOPIFY_STRAWBERRY_ACCESS_METHOD
+        value: admin_token
+      - key: SHOPIFY_STRAWBERRY_ADMIN_ACCESS_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_STRAWBERRY_LOCATION_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_STRAWBERRY_ENABLED
+        value: "true"
+      - key: SHOPIFY_STRAWBERRY_USE_LEGACY_SHOPIFY_ID_COLUMN
+        value: "true"
 domains:
   - domain: newwithtags.us
     type: PRIMARY
     minimum_tls_version: "1.2"
 workers:
   - name: retry-worker
+    github:
+      repo: BennyTheBall/square-webhook-sync
+      branch: main
+      deploy_on_push: true
     dockerfile_path: Dockerfile
     source_dir: /
     instance_count: 1
