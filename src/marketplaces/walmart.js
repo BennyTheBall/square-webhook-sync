@@ -9,6 +9,16 @@ function walmartHeaders(config) {
   };
 }
 
+function walmartInventoryHeaders(token) {
+  return {
+    'WM_SEC.ACCESS_TOKEN': token,
+    'WM_QOS.CORRELATION_ID': cryptoRandomId(),
+    'WM_SVC.NAME': 'Walmart Service Name',
+    'Content-Type': 'application/xml',
+    Accept: 'application/xml',
+  };
+}
+
 function cryptoRandomId() {
   return `square-sync-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -59,13 +69,7 @@ export async function syncWalmart({ config, skuRecord, quantity }) {
 
   const response = await fetch(url, {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/xml',
-      'WM_SVC.NAME': 'Walmart Marketplace',
-      'WM_QOS.CORRELATION_ID': cryptoRandomId(),
-    },
+    headers: walmartInventoryHeaders(token),
     body: `<?xml version="1.0" encoding="UTF-8"?><inventory xmlns="http://walmart.com/"><sku>${escapeXml(sku)}</sku><quantity><unit>EACH</unit><amount>${quantity}</amount></quantity></inventory>`,
   });
 

@@ -40,7 +40,9 @@ export function loadConfig() {
       baseUrl: process.env.WALMART_BASE_URL || "https://marketplace.walmartapis.com",
       clientId: process.env.WALMART_CLIENT_ID || "",
       clientSecret: process.env.WALMART_CLIENT_SECRET || "",
-      shipNode: process.env.WALMART_SHIP_NODE || ""
+      shipNode: process.env.WALMART_SHIP_NODE || "",
+      market: process.env.WALMART_MARKET || "us",
+      channelType: process.env.WALMART_CHANNEL_TYPE || ""
     },
     amazon: {
       enabled: boolFromEnv("AMAZON_ENABLED", false),
