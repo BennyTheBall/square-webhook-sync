@@ -133,12 +133,12 @@ export async function setShopifyInventory(store, db, inventoryItemId, quantity, 
       input: {
         name: 'available',
         reason: 'correction',
-        ignoreCompareQuantity: true,
         quantities: [
           {
             inventoryItemId,
             locationId: store.locationId,
             quantity,
+            changeFromQuantity: null,
           },
         ],
       },
