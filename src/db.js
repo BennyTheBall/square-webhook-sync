@@ -97,13 +97,13 @@ export async function markEventFailed(db, tables, eventId, error) {
 }
 
 export async function listPendingEvents(db, tables, limit = 25) {
+  const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 25));
   const [rows] = await db.execute(
     `SELECT event_id, payload_json
        FROM ${escapeId(tables.webhook)}
       WHERE status IN ('received','failed')
       ORDER BY received_at ASC
-      LIMIT :limit`,
-    { limit }
+      LIMIT ${safeLimit}`
   );
   return rows.map((row) => ({
     eventId: row.event_id,
