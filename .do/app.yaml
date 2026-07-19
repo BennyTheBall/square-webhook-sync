@@ -1,0 +1,80 @@
+name: square-webhook-sync
+region: nyc
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    source_dir: /
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    routes:
+      - path: /
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: SQUARE_WEBHOOK_NOTIFICATION_URL
+        value: https://newwithtags.us/webhooks/square
+      - key: SHOPIFY_STORES
+        value: strawberry,nwt
+      - key: SHOPIFY_NWT_NAME
+        value: New With Tags
+      - key: SHOPIFY_NWT_DOMAIN
+        value: NewWithTagsUS.myshopify.com
+      - key: SHOPIFY_NWT_API_VERSION
+        value: "2026-07"
+      - key: SHOPIFY_NWT_ACCESS_METHOD
+        value: expiring_offline_token
+      - key: SHOPIFY_NWT_REDIRECT_URI
+        value: https://newwithtags.us/shopify/oauth/callback
+      - key: SHOPIFY_NWT_SCOPES
+        value: read_products,write_inventory
+      - key: SHOPIFY_NWT_EXPIRING_OFFLINE_TOKENS
+        value: "true"
+      - key: SHOPIFY_NWT_ENABLED
+        value: "false"
+      - key: SHOPIFY_NWT_USE_LEGACY_SHOPIFY_ID_COLUMN
+        value: "false"
+      - key: SHOPIFY_OAUTH_STATE_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_NWT_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_NWT_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: SHOPIFY_NWT_LOCATION_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: SQUARE_WEBHOOK_SIGNATURE_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: MYSQL_HOST
+        scope: RUN_TIME
+        type: SECRET
+      - key: MYSQL_USER
+        scope: RUN_TIME
+        type: SECRET
+      - key: MYSQL_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: MYSQL_DATABASE
+        value: Strawberry
+domains:
+  - domain: newwithtags.us
+    type: PRIMARY
+    minimum_tls_version: "1.2"
+workers:
+  - name: retry-worker
+    dockerfile_path: Dockerfile
+    source_dir: /
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    run_command: npm run worker
+    envs:
+      - key: NODE_ENV
+        value: production
