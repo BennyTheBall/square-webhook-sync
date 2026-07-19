@@ -24,11 +24,10 @@ function getItemContext({ eventId, count, skuRecord, quantity, oldQuantity }) {
 
 function describeItem(context) {
   return [
-    `barcode=${context.barcode || 'unknown'}`,
-    `item=${context.itemName || 'unknown item'}`,
-    context.variantName ? `variant=${context.variantName}` : null,
-    context.vendor ? `vendor=${context.vendor}` : null,
-    `quantity=${context.oldQuantity}->${context.newQuantity}`,
+    context.barcode || 'unknown barcode',
+    context.itemName || 'unknown item',
+    context.variantName || null,
+    context.vendor || null,
   ].filter(Boolean).join(' | ');
 }
 
@@ -50,19 +49,11 @@ async function recordResult(db, result, context = {}) {
 }
 
 function logSyncResult({ context, marketplace, status, target, message }) {
-  logger.info('Inventory sync result', {
+  const targetText = target ? ` target=${target}` : '';
+  const details = message ? ` details=${message}` : '';
+  logger.info(`${marketplace}: ${status}${targetText}${details}`, {
     eventId: context.eventId,
-    marketplace,
-    status,
-    target,
     barcode: context.barcode,
-    squareCatalogObjectId: context.squareCatalogObjectId,
-    itemName: context.itemName,
-    variantName: context.variantName,
-    vendor: context.vendor,
-    oldQuantity: context.oldQuantity,
-    newQuantity: context.newQuantity,
-    message,
   });
 }
 
@@ -91,9 +82,9 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
     const oldQuantity = getCurrentQuantity(skuRecord);
     const context = getItemContext({ eventId, count, skuRecord, quantity: count.quantity, oldQuantity });
 
-    logger.info('Inventory sync item received', {
-      ...context,
-      description: describeItem(context),
+    logger.info(`ProductInfo: ${describeItem(context)} | quantity ${oldQuantity} -> ${count.quantity}`, {
+      eventId,
+      barcode: context.barcode,
     });
 
     if (oldQuantity !== count.quantity) {
@@ -106,8 +97,8 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
     }
 
     const localMessage = oldQuantity === count.quantity
-      ? `Database already current | ${describeItem(context)}`
-      : `Database updated | ${describeItem(context)}`;
+      ? `already current at ${count.quantity}`
+      : `set to ${count.quantity}`;
 
     await recordResult(db, {
       eventId,
@@ -118,7 +109,7 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
       quantity: count.quantity,
       message: localMessage,
     }, context);
-    logSyncResult({ context, marketplace: 'database', status: 'success', message: localMessage });
+    logSyncResult({ context, marketplace: 'Updating Database', status: 'complete', message: localMessage });
 
     for (const store of config.shopify.stores) {
       const marketplace = `shopify:${store.key}`;
@@ -127,7 +118,8 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         if (result.externalId && store.useLegacyShopifyIdColumn && !skuRecord.ShopifyID && typeof db.updateShopifyId === 'function') {
           await db.updateShopifyId({ skuRecord, shopifyId: result.externalId });
         }
-        const message = result.message || `${store.name || store.key} ${result.status} | ${describeItem(context)}`;
+        const targetName = store.key === 'strawberry' ? 'TheStrawberryShopYork' : (store.name || store.key);
+        const message = result.message || `set to ${count.quantity}`;
         await recordResult(db, {
           eventId,
           catalogObjectId: count.catalogObjectId,
@@ -138,10 +130,17 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
           externalId: result.externalId,
           message,
         }, context);
-        logSyncResult({ context, marketplace, status: result.status, target: result.externalId, message });
+        logSyncResult({
+          context,
+          marketplace: `Updating Shopify: ${targetName}`,
+          status: result.status === 'success' ? 'complete' : result.status,
+          target: result.externalId,
+          message,
+        });
       } catch (error) {
         failures.push(error);
-        const message = `${store.name || store.key} failed | ${describeItem(context)} | ${error.message}`;
+        const targetName = store.key === 'strawberry' ? 'TheStrawberryShopYork' : (store.name || store.key);
+        const message = `set to ${count.quantity}; ${error.message}`;
         await recordResult(db, {
           eventId,
           catalogObjectId: count.catalogObjectId,
@@ -151,13 +150,13 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
           quantity: count.quantity,
           message,
         }, context);
-        logSyncResult({ context, marketplace, status: 'failed', message });
+        logSyncResult({ context, marketplace: `Updating Shopify: ${targetName}`, status: 'error', message });
       }
     }
 
     try {
       const result = await syncWalmart({ config: config.walmart, skuRecord, quantity: count.quantity });
-      const message = result.message || `Walmart ${result.status} | ${describeItem(context)}`;
+      const message = result.message || `set to ${count.quantity}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -168,10 +167,16 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         externalId: result.externalId,
         message,
       }, context);
-      logSyncResult({ context, marketplace: 'walmart', status: result.status, target: result.externalId, message });
+      logSyncResult({
+        context,
+        marketplace: 'Updating Walmart',
+        status: result.status === 'success' ? 'complete' : result.status,
+        target: result.externalId,
+        message,
+      });
     } catch (error) {
       failures.push(error);
-      const message = `Walmart failed | ${describeItem(context)} | ${error.message}`;
+      const message = `set to ${count.quantity}; ${error.message}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -181,12 +186,12 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         quantity: count.quantity,
         message,
       }, context);
-      logSyncResult({ context, marketplace: 'walmart', status: 'failed', message });
+      logSyncResult({ context, marketplace: 'Updating Walmart', status: 'error', message });
     }
 
     try {
       const result = await syncAmazon({ config: config.amazon, skuRecord, quantity: count.quantity });
-      const message = result.message || `Amazon ${result.status} | ${describeItem({ ...context, newQuantity: result.quantity ?? count.quantity })}`;
+      const message = result.message || `set to ${result.quantity ?? count.quantity}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -197,10 +202,16 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         externalId: result.externalId,
         message,
       }, { ...context, newQuantity: result.quantity ?? count.quantity });
-      logSyncResult({ context: { ...context, newQuantity: result.quantity ?? count.quantity }, marketplace: 'amazon', status: result.status, target: result.externalId, message });
+      logSyncResult({
+        context: { ...context, newQuantity: result.quantity ?? count.quantity },
+        marketplace: 'Updating Amazon',
+        status: result.status === 'success' ? 'complete' : result.status,
+        target: result.externalId,
+        message,
+      });
     } catch (error) {
       failures.push(error);
-      const message = `Amazon failed | ${describeItem(context)} | ${error.message}`;
+      const message = `set to ${count.quantity}; ${error.message}`;
       await recordResult(db, {
         eventId,
         catalogObjectId: count.catalogObjectId,
@@ -210,7 +221,7 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
         quantity: count.quantity,
         message,
       }, context);
-      logSyncResult({ context, marketplace: 'amazon', status: 'failed', message });
+      logSyncResult({ context, marketplace: 'Updating Amazon', status: 'error', message });
     }
 
     processedCount += 1;
