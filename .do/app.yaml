@@ -20,7 +20,7 @@ services:
       - key: PORT
         value: "3000"
       - key: SQUARE_WEBHOOK_NOTIFICATION_URL
-        value: https://newwithtags.us/webhooks/square
+        value: https://webhooks.thestrawberryshopyork.com/webhooks/square
       - key: SHOPIFY_STORES
         value: strawberry,nwt
       - key: SHOPIFY_NWT_NAME
@@ -32,7 +32,7 @@ services:
       - key: SHOPIFY_NWT_ACCESS_METHOD
         value: expiring_offline_token
       - key: SHOPIFY_NWT_REDIRECT_URI
-        value: https://newwithtags.us/shopify/oauth/callback
+        value: https://webhooks.thestrawberryshopyork.com/shopify/oauth/callback
       - key: SHOPIFY_NWT_SCOPES
         value: read_products,write_inventory
       - key: SHOPIFY_NWT_EXPIRING_OFFLINE_TOKENS
@@ -97,7 +97,7 @@ services:
       - key: SHOPIFY_STRAWBERRY_USE_LEGACY_SHOPIFY_ID_COLUMN
         value: "true"
 domains:
-  - domain: newwithtags.us
+  - domain: webhooks.thestrawberryshopyork.com
     type: PRIMARY
     minimum_tls_version: "1.2"
 workers:
