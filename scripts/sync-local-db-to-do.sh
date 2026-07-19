@@ -23,6 +23,12 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+for mysql_client_bin in /usr/local/opt/mysql-client/bin /opt/homebrew/opt/mysql-client/bin; do
+  if [[ -d "$mysql_client_bin" ]]; then
+    PATH="$mysql_client_bin:$PATH"
+  fi
+done
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
