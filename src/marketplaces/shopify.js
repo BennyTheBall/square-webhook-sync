@@ -101,8 +101,8 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId, id
   const data = await shopifyGraphql(
     store,
     db,
-    `mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) @idempotent(idempotencyKey: $idempotencyKey) {
-      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+    `mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
+      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) @idempotent(key: $idempotencyKey) {
         inventoryLevel { id }
         userErrors { field message }
       }
@@ -123,8 +123,8 @@ export async function setShopifyInventory(store, db, inventoryItemId, quantity, 
   const data = await shopifyGraphql(
     store,
     db,
-    `mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) @idempotent(idempotencyKey: $idempotencyKey) {
-      inventorySetQuantities(input: $input) {
+    `mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+      inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
         inventoryAdjustmentGroup { createdAt reason }
         userErrors { field message }
       }
