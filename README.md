@@ -90,6 +90,43 @@ Add marketplace credentials only for channels you enable.
 
 For production reliability, run the web service plus the retry worker. The worker reprocesses events that were claimed but failed during marketplace sync.
 
+## Daily Database Sync
+
+The easiest automation is to keep the manual Square dump into local MySQL, then run one local script after that import finishes. It dumps `Strawberry` from `mserver` and imports it directly into DigitalOcean Managed MySQL.
+
+```bash
+cp scripts/db-sync.env.example scripts/db-sync.env
+```
+
+Fill in the DigitalOcean database host, port, user, password, and database name in `scripts/db-sync.env`. The local defaults are:
+
+```text
+LOCAL_DB_HOST=mserver
+LOCAL_DB_USER=root
+LOCAL_DB_PASSWORD=
+LOCAL_DB_NAME=Strawberry
+```
+
+Run the sync:
+
+```bash
+scripts/sync-local-db-to-do.sh
+```
+
+To automate it daily on macOS after your manual Square import, run:
+
+```bash
+crontab -e
+```
+
+Add a line like this, adjusting the time:
+
+```cron
+30 6 * * * /Volumes/DevSSD/Projects/codex/SquareWebhookSync/scripts/sync-local-db-to-do.sh >> /tmp/square-webhook-db-sync.log 2>&1
+```
+
+The script does not drop the app-only `shopify_store_tokens`, `square_webhook_events`, or `square_inventory_sync_results` tables unless those same tables exist in the local dump. It also re-applies `sql/schema.sql` after each import.
+
 ## Better Way Notes
 
 The old PHP file responded early with `fastcgi_finish_request`, which is good for Square timeouts, but it continued processing in the same request. This version records the event first, acknowledges quickly, and lets failed marketplace syncs be retried. The external inventory updates are absolute quantity sets, so retrying the same event is safe.
