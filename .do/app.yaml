@@ -2,10 +2,9 @@ name: square-webhook-sync
 region: nyc
 services:
   - name: web
-    github:
-      repo: BennyTheBall/square-webhook-sync
+    git:
+      repo_clone_url: https://github.com/BennyTheBall/square-webhook-sync.git
       branch: main
-      deploy_on_push: true
     dockerfile_path: Dockerfile
     source_dir: /
     http_port: 3000
@@ -101,10 +100,9 @@ domains:
     minimum_tls_version: "1.2"
 workers:
   - name: retry-worker
-    github:
-      repo: BennyTheBall/square-webhook-sync
+    git:
+      repo_clone_url: https://github.com/BennyTheBall/square-webhook-sync.git
       branch: main
-      deploy_on_push: true
     dockerfile_path: Dockerfile
     source_dir: /
     instance_count: 1
