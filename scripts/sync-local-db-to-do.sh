@@ -14,6 +14,15 @@ set -a
 source "$ENV_FILE"
 set +a
 
+if [[ -n "${LOG_FILE:-}" ]]; then
+  mkdir -p "$(dirname "$LOG_FILE")"
+  exec > >(tee -a "$LOG_FILE") 2>&1
+fi
+
+log() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -45,7 +54,7 @@ require_command gunzip
 : "${KEEP_DUMP:=false}"
 
 if [[ -z "${DO_DB_HOST:-}" || -z "${DO_DB_PASSWORD:-}" ]]; then
-  echo "DO_DB_HOST and DO_DB_PASSWORD must be set in $ENV_FILE." >&2
+  log "DO_DB_HOST and DO_DB_PASSWORD must be set in $ENV_FILE."
   exit 1
 fi
 
@@ -62,7 +71,8 @@ trap cleanup EXIT
 local_password_arg="$(mysql_password_arg "$LOCAL_DB_PASSWORD")"
 do_password_arg="$(mysql_password_arg "$DO_DB_PASSWORD")"
 
-echo "Dumping ${LOCAL_DB_NAME} from ${LOCAL_DB_HOST}..."
+log "Starting database sync."
+log "Dumping ${LOCAL_DB_NAME} from ${LOCAL_DB_HOST}..."
 mysqldump \
   --host="$LOCAL_DB_HOST" \
   --port="$LOCAL_DB_PORT" \
@@ -76,7 +86,9 @@ mysqldump \
   --no-tablespaces \
   "$LOCAL_DB_NAME" | gzip -c > "$dump_file"
 
-echo "Importing into DigitalOcean MySQL ${DO_DB_NAME}..."
+dump_bytes="$(wc -c < "$dump_file" | tr -d ' ')"
+log "Dump written to ${dump_file} (${dump_bytes} bytes compressed)."
+log "Importing into DigitalOcean MySQL ${DO_DB_NAME}..."
 gunzip -c "$dump_file" | mysql \
   --host="$DO_DB_HOST" \
   --port="$DO_DB_PORT" \
@@ -85,7 +97,7 @@ gunzip -c "$dump_file" | mysql \
   --ssl-mode=REQUIRED \
   "$DO_DB_NAME"
 
-echo "Ensuring webhook support tables exist..."
+log "Ensuring webhook support tables exist..."
 mysql \
   --host="$DO_DB_HOST" \
   --port="$DO_DB_PORT" \
@@ -94,4 +106,4 @@ mysql \
   --ssl-mode=REQUIRED \
   "$DO_DB_NAME" < "$ROOT_DIR/sql/schema.sql"
 
-echo "Database sync complete."
+log "Database sync complete."

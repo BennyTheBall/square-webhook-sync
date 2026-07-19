@@ -113,6 +113,12 @@ Run the sync:
 scripts/sync-local-db-to-do.sh
 ```
 
+Watch the sync log:
+
+```bash
+tail -f /tmp/square-webhook-db-sync.log
+```
+
 To automate it daily on macOS after your manual Square import, run:
 
 ```bash
@@ -122,7 +128,7 @@ crontab -e
 Add a line like this, adjusting the time:
 
 ```cron
-30 6 * * * /Volumes/DevSSD/Projects/codex/SquareWebhookSync/scripts/sync-local-db-to-do.sh >> /tmp/square-webhook-db-sync.log 2>&1
+30 6 * * * /Volumes/DevSSD/Projects/codex/SquareWebhookSync/scripts/sync-local-db-to-do.sh
 ```
 
 The script does not drop the app-only `shopify_store_tokens`, `square_webhook_events`, or `square_inventory_sync_results` tables unless those same tables exist in the local dump. It also re-applies `sql/schema.sql` after each import.
