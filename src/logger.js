@@ -4,13 +4,8 @@ const threshold = levels[configuredLevel] ?? levels.info;
 
 export function log(level, message, fields = {}) {
   if ((levels[level] ?? levels.info) > threshold) return;
-  const record = {
-    level,
-    time: new Date().toISOString(),
-    message,
-    ...redact(fields)
-  };
-  console.log(JSON.stringify(record));
+  const fieldText = formatFields(redact(fields));
+  console.log(fieldText ? `${message} ${fieldText}` : message);
 }
 
 export const logger = {
@@ -40,4 +35,18 @@ function redact(value) {
     }
   }
   return output;
+}
+
+function formatFields(fields) {
+  if (!fields || typeof fields !== "object") return "";
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${formatValue(value)}`)
+    .join(" ");
+}
+
+function formatValue(value) {
+  if (value instanceof Error) return value.message;
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).replace(/\s+/g, " ");
 }
