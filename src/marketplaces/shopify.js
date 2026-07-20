@@ -66,7 +66,7 @@ function escapeSearchValue(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-export async function findShopifyInventoryItem(store, db, skuRecord) {
+export async function findShopifyInventoryItem(store, db, skuRecord, excludeInventoryItemId = null) {
   const searchValue = skuRecord.SKU || skuRecord.Sku || skuRecord.Barcode || skuRecord.Code;
   if (!searchValue) {
     return null;
@@ -80,7 +80,7 @@ export async function findShopifyInventoryItem(store, db, skuRecord) {
     store,
     db,
     `query FindVariant($query: String!) {
-      productVariants(first: 1, query: $query) {
+      productVariants(first: 10, query: $query) {
         edges {
           node {
             id
@@ -94,7 +94,12 @@ export async function findShopifyInventoryItem(store, db, skuRecord) {
     { query: queryText },
   );
 
-  return data.productVariants?.edges?.[0]?.node?.inventoryItem?.id || null;
+  const matches = data.productVariants?.edges || [];
+  const match = matches.find((edge) => {
+    const inventoryItemId = edge?.node?.inventoryItem?.id;
+    return inventoryItemId && inventoryItemId !== excludeInventoryItemId;
+  });
+  return match?.node?.inventoryItem?.id || null;
 }
 
 export async function activateInventoryAtLocation(store, db, inventoryItemId, idempotencyKey) {
@@ -116,7 +121,7 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId, id
     if (!ignorable) {
       const deleted = errors.some((error) => /product (was|is) deleted|couldn'?t be stocked/i.test(error.message || ''));
       if (deleted) {
-        return { skipped: true, message: errors.map((error) => error.message).join('; ') };
+        return { skipped: true, staleInventoryItem: true, message: errors.map((error) => error.message).join('; ') };
       }
       throw new Error(`Shopify ${store.key} inventoryActivate failed: ${errors.map((error) => error.message).join('; ')}`);
     }
@@ -166,16 +171,25 @@ export async function syncShopifyStore({ store, db, skuRecord, quantity, eventId
   }
 
   const cachedId = store.useLegacyShopifyIdColumn ? skuRecord.ShopifyID : null;
-  const inventoryItemId = cachedId || (await findShopifyInventoryItem(store, db, skuRecord));
+  let inventoryItemId = cachedId || (await findShopifyInventoryItem(store, db, skuRecord));
   if (!inventoryItemId) {
     return { status: 'skipped', message: 'Variant not found by barcode/SKU' };
   }
 
   const sku = skuRecord.SKU || skuRecord.Sku || skuRecord.ID || inventoryItemId;
-  const activation = await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate`);
+  let activation = await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate`);
+  let replaceLegacyShopifyId = false;
+  if (activation.staleInventoryItem && cachedId) {
+    const freshInventoryItemId = await findShopifyInventoryItem(store, db, skuRecord, cachedId);
+    if (freshInventoryItemId) {
+      inventoryItemId = freshInventoryItemId;
+      replaceLegacyShopifyId = true;
+      activation = await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate:fresh`);
+    }
+  }
   if (activation.skipped) {
     return { status: 'skipped', externalId: inventoryItemId, message: `Shopify product deleted or unavailable at location: ${activation.message}` };
   }
   await setShopifyInventory(store, db, inventoryItemId, quantity, `${eventId}:${store.key}:${sku}:set:${quantity}`);
-  return { status: 'success', externalId: inventoryItemId };
+  return { status: 'success', externalId: inventoryItemId, replaceLegacyShopifyId };
 }

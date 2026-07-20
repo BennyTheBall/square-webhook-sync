@@ -115,8 +115,9 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
       const marketplace = `shopify:${store.key}`;
       try {
         const result = await syncShopifyStore({ store, db, skuRecord, quantity: count.quantity, eventId });
-        if (result.externalId && store.useLegacyShopifyIdColumn && !skuRecord.ShopifyID && typeof db.updateShopifyId === 'function') {
+        if (result.externalId && store.useLegacyShopifyIdColumn && (!skuRecord.ShopifyID || result.replaceLegacyShopifyId) && typeof db.updateShopifyId === 'function') {
           await db.updateShopifyId({ skuRecord, shopifyId: result.externalId });
+          skuRecord.ShopifyID = result.externalId;
         }
         const targetName = store.key === 'strawberry' ? 'TheStrawberryShopYork' : (store.name || store.key);
         const message = result.message || `set to ${count.quantity}`;

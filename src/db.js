@@ -151,7 +151,7 @@ export async function updateLocalQuantity(db, tables, skuRecord, quantity, chang
 }
 
 export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, changedAt) {
-  if (skuRecord.ShopifyID) return { changed: false };
+  if (skuRecord.ShopifyID === inventoryItemId) return { changed: false };
 
   await db.execute(
     `UPDATE ${escapeId(tables.sku)}
