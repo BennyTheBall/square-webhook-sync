@@ -78,7 +78,7 @@ export async function syncWalmart({ config, skuRecord, quantity }) {
     if (isWalmartSkuNotFound(response.status, bodyText)) {
       return { status: 'skipped', externalId: sku, message: 'Walmart SKU not found; not retried' };
     }
-    throw new Error(`Walmart inventory failed: ${response.status} ${bodyText.slice(0, 500)}`);
+    throw new Error(`Walmart inventory failed: ${response.status} ${walmartErrorSummary(bodyText)}`);
   }
 
   return { status: 'success', externalId: sku };
@@ -86,7 +86,26 @@ export async function syncWalmart({ config, skuRecord, quantity }) {
 
 export function isWalmartSkuNotFound(status, bodyText) {
   if (Number(status) !== 404) return false;
-  return /sku[\s._-]*not[\s._-]*found/i.test(String(bodyText || ""));
+  const text = String(bodyText || "");
+  return /sku[\s._-]*not[\s._-]*found/i.test(text)
+    || /sku[\s\S]{0,200}not[\s\S]{0,80}found/i.test(text)
+    || /not[\s\S]{0,80}found[\s\S]{0,200}sku/i.test(text)
+    || /not[\s\S]{0,80}find[\s\S]{0,200}sku/i.test(text);
+}
+
+export function walmartErrorSummary(bodyText) {
+  const text = String(bodyText || "").replace(/\s+/g, " ").trim();
+  if (!text) return "empty response";
+
+  try {
+    const parsed = JSON.parse(text);
+    const first = Array.isArray(parsed?.errors) ? parsed.errors[0] : parsed?.error?.[0] || parsed?.error || parsed;
+    const code = first?.code || first?.errorCode || first?.category || "";
+    const description = first?.description || first?.message || first?.info || "";
+    return truncate([code, description].filter(Boolean).join(" - ") || text, 180);
+  } catch {
+    return truncate(text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), 180);
+  }
 }
 
 function escapeXml(value) {
@@ -96,4 +115,10 @@ function escapeXml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function truncate(value, maxLength) {
+  const text = String(value || "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
 }
