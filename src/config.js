@@ -33,6 +33,20 @@ export function loadConfig() {
       limit: numberFromEnv("WORKER_LIMIT", 25),
       intervalMs: numberFromEnv("WORKER_INTERVAL_MS", 60000)
     },
+    summaryEmail: {
+      enabled: boolFromEnv("SUMMARY_EMAIL_ENABLED", false),
+      time: process.env.SUMMARY_EMAIL_TIME || "23:55",
+      timezone: process.env.SUMMARY_EMAIL_TIMEZONE || "America/New_York",
+      from: process.env.SUMMARY_EMAIL_FROM || "",
+      to: process.env.SUMMARY_EMAIL_TO || "",
+      smtp: {
+        host: process.env.SMTP_HOST || "",
+        port: numberFromEnv("SMTP_PORT", 587),
+        secure: boolFromEnv("SMTP_SECURE", false),
+        user: process.env.SMTP_USER || "",
+        password: process.env.SMTP_PASSWORD || ""
+      }
+    },
     shopify: {
       allStores: allShopifyStores,
       stores: shopifyStores

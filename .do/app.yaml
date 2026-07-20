@@ -79,6 +79,31 @@ services:
         value: square_webhook_events
       - key: WORKER_INTERVAL_MS
         value: "60000"
+      - key: SUMMARY_EMAIL_ENABLED
+        value: "false"
+      - key: SUMMARY_EMAIL_TIME
+        value: "23:55"
+      - key: SUMMARY_EMAIL_TIMEZONE
+        value: America/New_York
+      - key: SUMMARY_EMAIL_FROM
+        scope: RUN_TIME
+        type: SECRET
+      - key: SUMMARY_EMAIL_TO
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_HOST
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
       - key: SHOPIFY_STRAWBERRY_NAME
         value: The Strawberry Shop York
       - key: SHOPIFY_STRAWBERRY_DOMAIN
@@ -117,3 +142,28 @@ workers:
         value: production
       - key: TZ
         value: America/New_York
+      - key: SUMMARY_EMAIL_ENABLED
+        value: "false"
+      - key: SUMMARY_EMAIL_TIME
+        value: "23:55"
+      - key: SUMMARY_EMAIL_TIMEZONE
+        value: America/New_York
+      - key: SUMMARY_EMAIL_FROM
+        scope: RUN_TIME
+        type: SECRET
+      - key: SUMMARY_EMAIL_TO
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_HOST
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_PASSWORD
+        scope: RUN_TIME
+        type: SECRET

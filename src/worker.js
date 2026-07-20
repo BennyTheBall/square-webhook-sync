@@ -2,6 +2,7 @@ import { config } from './config.js';
 import { createDb } from './db.js';
 import { logger } from './logger.js';
 import { processSquareEvent } from './processor.js';
+import { maybeSendDailySummary } from './summaryEmail.js';
 
 const db = createDb(config);
 
@@ -21,6 +22,11 @@ async function main() {
   logger.info('Retry worker started', { intervalMs: config.worker.intervalMs });
   while (true) {
     await runOnce();
+    try {
+      await maybeSendDailySummary({ db, config });
+    } catch (error) {
+      logger.error('Daily summary check failed', { error });
+    }
     await new Promise((resolve) => setTimeout(resolve, config.worker.intervalMs));
   }
 }

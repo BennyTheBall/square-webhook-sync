@@ -32,6 +32,9 @@ export function createDb(config) {
     updateShopifyId: ({ skuRecord, shopifyId }) => updateShopifyId(pool, tables, skuRecord, shopifyId, new Date()),
     getShopifyToken: (storeKey) => getShopifyToken(pool, storeKey),
     saveShopifyToken: (token) => saveShopifyToken(pool, token),
+    getDailySummaryEmail: (summaryDate) => getDailySummaryEmail(pool, summaryDate),
+    markDailySummaryEmail: (result) => markDailySummaryEmail(pool, result),
+    getDailySummary: (range) => getDailySummary(pool, range),
     recordSyncResult: (result) =>
       recordSyncResult(
         pool,
@@ -249,6 +252,93 @@ export async function saveShopifyToken(db, token) {
       scope: token.scope || null
     }
   );
+}
+
+export async function getDailySummaryEmail(db, summaryDate) {
+  const [rows] = await db.execute(
+    `SELECT summary_date, recipient, status, sent_at, last_error
+       FROM daily_summary_emails
+      WHERE summary_date = :summaryDate
+      LIMIT 1`,
+    { summaryDate }
+  );
+  return rows[0] || null;
+}
+
+export async function markDailySummaryEmail(db, result) {
+  await db.execute(
+    `INSERT INTO daily_summary_emails
+       (summary_date, recipient, status, sent_at, last_error)
+     VALUES
+       (:summaryDate, :recipient, :status, :sentAt, :lastError)
+     ON DUPLICATE KEY UPDATE
+       recipient = VALUES(recipient),
+       status = VALUES(status),
+       sent_at = VALUES(sent_at),
+       last_error = VALUES(last_error)`,
+    {
+      summaryDate: result.summaryDate,
+      recipient: result.recipient,
+      status: result.status,
+      sentAt: result.sentAt || null,
+      lastError: result.lastError || null
+    }
+  );
+}
+
+export async function getDailySummary(db, { startUtc, endUtc }) {
+  const params = { startUtc, endUtc };
+  const [events] = await db.execute(
+    `SELECT status, COUNT(*) AS count
+       FROM square_webhook_events
+      WHERE received_at >= :startUtc AND received_at < :endUtc
+      GROUP BY status
+      ORDER BY status`,
+    params
+  );
+  const [results] = await db.execute(
+    `SELECT marketplace, status, COUNT(*) AS count
+       FROM square_inventory_sync_results
+      WHERE created_at >= :startUtc AND created_at < :endUtc
+      GROUP BY marketplace, status
+      ORDER BY marketplace, status`,
+    params
+  );
+  const [products] = await db.execute(
+    `SELECT COUNT(DISTINCT sku) AS sku_count,
+            COUNT(DISTINCT event_id) AS event_count,
+            COUNT(*) AS result_count
+       FROM square_inventory_sync_results
+      WHERE created_at >= :startUtc AND created_at < :endUtc`,
+    params
+  );
+  const [failures] = await db.execute(
+    `SELECT event_id, sku, item_name, variant_name, vendor, quantity,
+            marketplace, status, message, created_at
+       FROM square_inventory_sync_results
+      WHERE created_at >= :startUtc AND created_at < :endUtc
+        AND status = 'failed'
+      ORDER BY created_at DESC
+      LIMIT 25`,
+    params
+  );
+  const [recent] = await db.execute(
+    `SELECT event_id, sku, item_name, variant_name, vendor, quantity,
+            marketplace, status, message, created_at
+       FROM square_inventory_sync_results
+      WHERE created_at >= :startUtc AND created_at < :endUtc
+      ORDER BY created_at DESC
+      LIMIT 25`,
+    params
+  );
+
+  return {
+    events,
+    results,
+    products: products[0] || { sku_count: 0, event_count: 0, result_count: 0 },
+    failures,
+    recent
+  };
 }
 
 export function escapeId(identifier) {
