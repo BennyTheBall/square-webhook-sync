@@ -17,6 +17,8 @@ services:
     envs:
       - key: NODE_ENV
         value: production
+      - key: TZ
+        value: America/New_York
       - key: PORT
         value: "3000"
       - key: SQUARE_WEBHOOK_NOTIFICATION_URL
@@ -113,3 +115,5 @@ workers:
     envs:
       - key: NODE_ENV
         value: production
+      - key: TZ
+        value: America/New_York

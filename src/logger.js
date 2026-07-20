@@ -5,7 +5,8 @@ const threshold = levels[configuredLevel] ?? levels.info;
 export function log(level, message, fields = {}) {
   if ((levels[level] ?? levels.info) > threshold) return;
   const fieldText = formatFields(redact(fields));
-  console.log(fieldText ? `${message} ${fieldText}` : message);
+  const line = `${easternTimestamp()} ${message}`;
+  console.log(fieldText ? `${line} ${fieldText}` : line);
 }
 
 export const logger = {
@@ -49,4 +50,21 @@ function formatValue(value) {
   if (value instanceof Error) return value.message;
   if (typeof value === "object") return JSON.stringify(value);
   return String(value).replace(/\s+/g, " ");
+}
+
+function easternTimestamp() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short"
+  }).formatToParts(new Date());
+
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `[${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")} ${get("timeZoneName")}]`;
 }
