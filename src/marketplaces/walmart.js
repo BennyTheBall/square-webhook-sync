@@ -75,10 +75,18 @@ export async function syncWalmart({ config, skuRecord, quantity }) {
 
   const bodyText = await response.text();
   if (!response.ok) {
+    if (isWalmartSkuNotFound(response.status, bodyText)) {
+      return { status: 'skipped', externalId: sku, message: 'Walmart SKU not found; not retried' };
+    }
     throw new Error(`Walmart inventory failed: ${response.status} ${bodyText.slice(0, 500)}`);
   }
 
   return { status: 'success', externalId: sku };
+}
+
+export function isWalmartSkuNotFound(status, bodyText) {
+  if (Number(status) !== 404) return false;
+  return /sku[\s._-]*not[\s._-]*found/i.test(String(bodyText || ""));
 }
 
 function escapeXml(value) {
