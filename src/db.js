@@ -331,13 +331,23 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
       LIMIT 25`,
     params
   );
+  const [activity] = await db.execute(
+    `SELECT event_id, sku, item_name, variant_name, vendor, quantity,
+            marketplace, status, message, created_at
+       FROM square_inventory_sync_results
+      WHERE created_at >= :startUtc AND created_at < :endUtc
+      ORDER BY created_at DESC
+      LIMIT 1000`,
+    params
+  );
 
   return {
     events,
     results,
     products: products[0] || { sku_count: 0, event_count: 0, result_count: 0 },
     failures,
-    recent
+    recent,
+    activity
   };
 }
 

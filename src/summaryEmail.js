@@ -38,6 +38,12 @@ export async function maybeSendDailySummary({ db, config, now = new Date(), tran
     range,
     summary
   });
+  const html = buildSummaryHtml({
+    summaryDate,
+    timezone,
+    range,
+    summary
+  });
 
   const mailer = transporter || nodemailer.createTransport({
     host: emailConfig.smtp.host,
@@ -53,7 +59,8 @@ export async function maybeSendDailySummary({ db, config, now = new Date(), tran
       from: emailConfig.from,
       to: emailConfig.to,
       subject: `Square Sync Daily Recap - ${summaryDate}`,
-      text: message
+      text: message,
+      html
     });
     await db.markDailySummaryEmail({
       summaryDate,
@@ -77,6 +84,7 @@ export async function maybeSendDailySummary({ db, config, now = new Date(), tran
 
 export function buildSummaryMessage({ summaryDate, timezone, range, summary }) {
   const product = summary.products || {};
+  const activity = buildActivityRows(summary.activity || summary.recent || [], timezone);
   const lines = [
     `Square Sync Daily Recap`,
     `Date: ${summaryDate} (${timezone})`,
@@ -90,13 +98,36 @@ export function buildSummaryMessage({ summaryDate, timezone, range, summary }) {
     "Sync results:",
     ...formatMarketplaceCounts(summary.results),
     "",
-    "Failures:",
-    ...formatRows(summary.failures, "No failures."),
+    "Sync activity:",
+    ...formatActivityTable(activity),
     "",
-    "Recent updates:",
-    ...formatRows(summary.recent, "No sync activity.")
+    "Failures:",
+    ...formatRows(summary.failures, "No failures.")
   ];
   return `${lines.join("\n")}\n`;
+}
+
+export function buildSummaryHtml({ summaryDate, timezone, range, summary }) {
+  const product = summary.products || {};
+  const activity = buildActivityRows(summary.activity || summary.recent || [], timezone);
+  const failureRows = summary.failures || [];
+  return `<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #222; line-height: 1.35;">
+    <h2 style="margin: 0 0 8px;">Square Sync Daily Recap</h2>
+    <p style="margin: 0 0 12px;">
+      <strong>Date:</strong> ${escapeHtml(summaryDate)} (${escapeHtml(timezone)})<br>
+      <strong>Window:</strong> ${escapeHtml(formatDateTime(range.startUtc, timezone))} to ${escapeHtml(formatDateTime(range.endUtc, timezone))}<br>
+      <strong>Totals:</strong> ${Number(product.event_count || 0)} events, ${Number(product.sku_count || 0)} products, ${Number(product.result_count || 0)} marketplace/database updates
+    </p>
+    ${htmlCounts("Square webhook events", summary.events, "status")}
+    ${htmlMarketplaceCounts("Sync results", summary.results)}
+    <h3 style="margin: 16px 0 8px;">Sync Activity</h3>
+    ${htmlActivityTable(activity)}
+    <h3 style="margin: 16px 0 8px;">Failures</h3>
+    ${htmlFailures(failureRows)}
+  </body>
+</html>`;
 }
 
 export function dayRangeUtc(summaryDate, timezone = DEFAULT_TIMEZONE) {
@@ -124,6 +155,160 @@ function formatRows(rows, emptyText) {
     const details = row.message ? ` details=${row.message}` : "";
     return `  ${row.marketplace}: ${row.status} set to ${row.quantity ?? "?"} ${product}${details}`;
   });
+}
+
+function buildActivityRows(rows, timezone) {
+  const services = ["local", "shopify:strawberry", "shopify:nwt", "walmart", "amazon"];
+  const groups = new Map();
+  for (const row of rows || []) {
+    const key = `${row.event_id || ""}:${row.sku || ""}`;
+    const existing = groups.get(key) || {
+      eventId: row.event_id,
+      sku: row.sku,
+      description: describeSummaryItem(row),
+      quantity: row.quantity,
+      createdAt: row.created_at,
+      services: {}
+    };
+    if (!existing.description || existing.description === "unknown item") {
+      existing.description = describeSummaryItem(row);
+    }
+    if (row.created_at && (!existing.createdAt || new Date(row.created_at) > new Date(existing.createdAt))) {
+      existing.createdAt = row.created_at;
+    }
+    existing.quantity = row.quantity ?? existing.quantity;
+    existing.services[row.marketplace] = serviceStatus(row);
+    groups.set(key, existing);
+  }
+
+  return [...groups.values()]
+    .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
+    .map((row) => {
+      const parts = getZonedParts(new Date(row.createdAt), timezone);
+      return {
+        ...row,
+        date: formatDate(parts),
+        time: `${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}`,
+        database: row.services.local || "",
+        strawberry: row.services["shopify:strawberry"] || "",
+        nwt: row.services["shopify:nwt"] || "",
+        walmart: row.services.walmart || "",
+        amazon: row.services.amazon || "",
+        serviceOrder: services
+      };
+    });
+}
+
+function formatActivityTable(rows) {
+  if (!rows.length) return ["  No sync activity."];
+  const headers = ["SKU", "Desc", "Qty", "Date", "Time", "DB", "Strawberry", "NWT", "Walmart", "Amazon"];
+  const data = rows.map((row) => [
+    row.sku || "",
+    truncate(row.description || "", 42),
+    row.quantity ?? "",
+    row.date || "",
+    row.time || "",
+    row.database,
+    row.strawberry,
+    row.nwt,
+    row.walmart,
+    row.amazon
+  ]);
+  return formatTextTable(headers, data);
+}
+
+function formatTextTable(headers, rows) {
+  const widths = headers.map((header, index) =>
+    Math.min(42, Math.max(header.length, ...rows.map((row) => String(row[index] ?? "").length)))
+  );
+  const line = widths.map((width) => "-".repeat(width)).join("-+-");
+  return [
+    headers.map((header, index) => padCell(header, widths[index])).join(" | "),
+    line,
+    ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index])).join(" | "))
+  ];
+}
+
+function padCell(value, width) {
+  const text = truncate(String(value ?? ""), width);
+  return text.padEnd(width, " ");
+}
+
+function serviceStatus(row) {
+  if (row.status === "success") return "yes";
+  if (row.status === "skipped") return "skip";
+  if (row.status === "failed") return "no";
+  return row.status || "";
+}
+
+function describeSummaryItem(row) {
+  return [row.item_name, row.variant_name, row.vendor].filter(Boolean).join(" | ") || "unknown item";
+}
+
+function htmlCounts(title, rows, key) {
+  const items = rows?.length
+    ? rows.map((row) => `<li>${escapeHtml(row[key])}: ${Number(row.count || 0)}</li>`).join("")
+    : "<li>none</li>";
+  return `<h3 style="margin: 16px 0 4px;">${escapeHtml(title)}</h3><ul style="margin-top: 0;">${items}</ul>`;
+}
+
+function htmlMarketplaceCounts(title, rows) {
+  const items = rows?.length
+    ? rows.map((row) => `<li>${escapeHtml(row.marketplace)}: ${escapeHtml(row.status)} ${Number(row.count || 0)}</li>`).join("")
+    : "<li>none</li>";
+  return `<h3 style="margin: 16px 0 4px;">${escapeHtml(title)}</h3><ul style="margin-top: 0;">${items}</ul>`;
+}
+
+function htmlActivityTable(rows) {
+  if (!rows.length) return `<p>No sync activity.</p>`;
+  const headers = ["SKU", "Desc", "Qty", "Date", "Time", "DB", "Strawberry", "NWT", "Walmart", "Amazon"];
+  const body = rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.sku || "")}</td>
+        <td>${escapeHtml(row.description || "")}</td>
+        <td>${escapeHtml(row.quantity ?? "")}</td>
+        <td>${escapeHtml(row.date || "")}</td>
+        <td>${escapeHtml(row.time || "")}</td>
+        <td>${escapeHtml(row.database)}</td>
+        <td>${escapeHtml(row.strawberry)}</td>
+        <td>${escapeHtml(row.nwt)}</td>
+        <td>${escapeHtml(row.walmart)}</td>
+        <td>${escapeHtml(row.amazon)}</td>
+      </tr>`).join("");
+  return `<table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 13px;">
+    <thead><tr>${headers.map((header) => `<th align="left">${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function htmlFailures(rows) {
+  if (!rows.length) return `<p>No failures.</p>`;
+  const body = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.sku || "")}</td>
+      <td>${escapeHtml(describeSummaryItem(row))}</td>
+      <td>${escapeHtml(row.marketplace || "")}</td>
+      <td>${escapeHtml(row.quantity ?? "")}</td>
+      <td>${escapeHtml(row.message || "")}</td>
+    </tr>`).join("");
+  return `<table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 13px;">
+    <thead><tr><th align="left">SKU</th><th align="left">Desc</th><th align="left">Service</th><th align="left">Qty</th><th align="left">Details</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function truncate(value, maxLength) {
+  const text = String(value ?? "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
 }
 
 function missingEmailConfig(emailConfig) {
