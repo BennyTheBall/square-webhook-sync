@@ -11,8 +11,10 @@ export function loadConfig() {
     port: numberFromEnv("PORT", 8088),
     dryRun: boolFromEnv("DRY_RUN", false),
     square: {
+      accessToken: process.env.SQUARE_ACCESS_TOKEN || "",
       signatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
-      notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || ""
+      notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || "",
+      apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com"
     },
     shopifyOauthStateSecret: process.env.SHOPIFY_OAUTH_STATE_SECRET || process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
     mysql: {

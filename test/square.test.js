@@ -33,11 +33,13 @@ test('extracts only in-stock inventory counts and clamps negative values', () =>
   assert.deepEqual(extractInventoryCounts(payload), [
     {
       catalogObjectId: 'abc',
+      locationId: undefined,
       quantity: 5,
       raw: { state: 'IN_STOCK', catalog_object_id: 'abc', quantity: '5' },
     },
     {
       catalogObjectId: 'def',
+      locationId: undefined,
       quantity: 0,
       raw: { state: 'IN_STOCK', catalog_object_id: 'def', quantity: '-2' },
     },

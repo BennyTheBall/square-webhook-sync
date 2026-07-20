@@ -1,4 +1,4 @@
-import { extractInventoryCounts } from './square.js';
+import { extractInventoryCounts, getCurrentSquareQuantity } from './square.js';
 import { syncShopifyStore } from './marketplaces/shopify.js';
 import { syncWalmart } from './marketplaces/walmart.js';
 import { syncAmazon } from './marketplaces/amazon.js';
@@ -86,6 +86,19 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
       eventId,
       barcode: context.barcode,
     });
+
+    const squareCurrentQuantity = await getCurrentSquareQuantity({
+      config,
+      catalogObjectId: count.catalogObjectId,
+      locationId: count.locationId,
+    });
+
+    if (squareCurrentQuantity !== count.quantity) {
+      const message = `event wanted ${count.quantity}; using current Square quantity ${squareCurrentQuantity}`;
+      count.quantity = squareCurrentQuantity;
+      context.newQuantity = squareCurrentQuantity;
+      logSyncResult({ context, marketplace: 'Square freshness check', status: 'complete', message });
+    }
 
     if (oldQuantity !== count.quantity) {
       await db.updateLocalQuantity({
