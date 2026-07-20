@@ -114,9 +114,14 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId, id
   if (errors.length) {
     const ignorable = errors.every((error) => /already active/i.test(error.message || ''));
     if (!ignorable) {
+      const deleted = errors.some((error) => /product (was|is) deleted|couldn'?t be stocked/i.test(error.message || ''));
+      if (deleted) {
+        return { skipped: true, message: errors.map((error) => error.message).join('; ') };
+      }
       throw new Error(`Shopify ${store.key} inventoryActivate failed: ${errors.map((error) => error.message).join('; ')}`);
     }
   }
+  return { skipped: false };
 }
 
 export async function setShopifyInventory(store, db, inventoryItemId, quantity, idempotencyKey) {
@@ -167,7 +172,10 @@ export async function syncShopifyStore({ store, db, skuRecord, quantity, eventId
   }
 
   const sku = skuRecord.SKU || skuRecord.Sku || skuRecord.ID || inventoryItemId;
-  await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate`);
+  const activation = await activateInventoryAtLocation(store, db, inventoryItemId, `${eventId}:${store.key}:${sku}:activate`);
+  if (activation.skipped) {
+    return { status: 'skipped', externalId: inventoryItemId, message: `Shopify product deleted or unavailable at location: ${activation.message}` };
+  }
   await setShopifyInventory(store, db, inventoryItemId, quantity, `${eventId}:${store.key}:${sku}:set:${quantity}`);
   return { status: 'success', externalId: inventoryItemId };
 }
