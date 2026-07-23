@@ -27,6 +27,9 @@ export function createDb(config) {
         payload_json: row.payload
       }));
     },
+    listFailedSyncResults: ({ limit } = {}) => listFailedSyncResults(pool, limit),
+    updateSyncResult: (result) => updateSyncResult(pool, result),
+    hasFailedSyncResults: (eventId) => hasFailedSyncResults(pool, eventId),
     findSkuRecord: (squareToken) => findSkuRecord(pool, tables, squareToken),
     updateLocalQuantity: ({ skuRecord, quantity }) => updateLocalQuantity(pool, tables, skuRecord, quantity, new Date()),
     updateShopifyId: ({ skuRecord, shopifyId }) => updateShopifyId(pool, tables, skuRecord, shopifyId, new Date()),
@@ -108,7 +111,16 @@ export async function listPendingEvents(db, tables, limit = 25) {
   const [rows] = await db.execute(
     `SELECT event_id, payload_json
        FROM ${escapeId(tables.webhook)}
-      WHERE status IN ('received','failed')
+      WHERE status = 'received'
+         OR (
+              status = 'failed'
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM square_inventory_sync_results
+                 WHERE square_inventory_sync_results.event_id = ${escapeId(tables.webhook)}.event_id
+                 LIMIT 1
+              )
+            )
       ORDER BY received_at ASC
       LIMIT ${safeLimit}`
   );
@@ -116,6 +128,49 @@ export async function listPendingEvents(db, tables, limit = 25) {
     eventId: row.event_id,
     payload: typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json
   }));
+}
+
+export async function listFailedSyncResults(db, limit = 25) {
+  const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 25));
+  const [rows] = await db.execute(
+    `SELECT id, event_id, sku, square_catalog_object_id, item_name, variant_name,
+            vendor, quantity, marketplace, target, status, message, created_at
+       FROM square_inventory_sync_results
+      WHERE status = 'failed'
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${safeLimit}`
+  );
+  return rows;
+}
+
+export async function updateSyncResult(db, result) {
+  await db.execute(
+    `UPDATE square_inventory_sync_results
+        SET status = :status,
+            target = :target,
+            quantity = :quantity,
+            message = :message
+      WHERE id = :id
+      LIMIT 1`,
+    {
+      id: result.id,
+      status: result.status,
+      target: result.target || null,
+      quantity: result.quantity ?? null,
+      message: String(result.message || "").slice(0, 5000)
+    }
+  );
+}
+
+export async function hasFailedSyncResults(db, eventId) {
+  const [rows] = await db.execute(
+    `SELECT 1
+       FROM square_inventory_sync_results
+      WHERE event_id = :eventId AND status = 'failed'
+      LIMIT 1`,
+    { eventId }
+  );
+  return rows.length > 0;
 }
 
 export async function findSkuRecord(db, tables, squareToken) {

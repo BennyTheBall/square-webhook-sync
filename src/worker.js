@@ -1,12 +1,12 @@
 import { config } from './config.js';
 import { createDb } from './db.js';
 import { logger } from './logger.js';
-import { processSquareEvent } from './processor.js';
+import { processSquareEvent, retryFailedSyncResult } from './processor.js';
 import { maybeSendDailySummary } from './summaryEmail.js';
 
 const db = createDb(config);
 
-async function runOnce() {
+export async function runOnce({ db, config }) {
   const events = await db.listPendingEvents({ limit: config.worker.limit });
   for (const event of events) {
     const payload = typeof event.payload_json === 'string' ? JSON.parse(event.payload_json) : event.payload_json;
@@ -16,12 +16,27 @@ async function runOnce() {
       logger.error('Worker event processing failed', { eventId: event.event_id, error });
     }
   }
+
+  const failedResults = await db.listFailedSyncResults?.({ limit: config.worker.limit }) || [];
+  for (const result of failedResults) {
+    try {
+      await retryFailedSyncResult({ db, config, result });
+    } catch (error) {
+      logger.error('Worker transaction retry failed', {
+        resultId: result.id,
+        eventId: result.event_id,
+        marketplace: result.marketplace,
+        sku: result.sku,
+        error,
+      });
+    }
+  }
 }
 
 async function main() {
   logger.info('Retry worker started', { intervalMs: config.worker.intervalMs });
   while (true) {
-    await runOnce();
+    await runOnce({ db, config });
     try {
       await maybeSendDailySummary({ db, config });
     } catch (error) {

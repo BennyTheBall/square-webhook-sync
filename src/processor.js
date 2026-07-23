@@ -35,6 +35,10 @@ function getCurrentQuantity(skuRecord) {
   return Number.parseInt(skuRecord.Quantity ?? skuRecord.quantity ?? '0', 10) || 0;
 }
 
+function resultMessage(result, quantity) {
+  return result.message || `set to ${result.quantity ?? quantity}`;
+}
+
 async function recordResult(db, result, context = {}) {
   if (typeof db.recordSyncResult === 'function') {
     await db.recordSyncResult({
@@ -45,6 +49,89 @@ async function recordResult(db, result, context = {}) {
       vendor: result.vendor ?? context.vendor,
       quantity: result.quantity ?? context.newQuantity,
     });
+  }
+}
+
+async function syncMarketplace({ db, config, marketplace, skuRecord, quantity, eventId }) {
+  if (marketplace.startsWith('shopify:')) {
+    const storeKey = marketplace.slice('shopify:'.length);
+    const store = (config.shopify.allStores || config.shopify.stores || []).find((candidate) => candidate.key === storeKey);
+    if (!store) {
+      throw new Error(`Unknown Shopify store for retry: ${storeKey}`);
+    }
+
+    const result = await syncShopifyStore({ store, db, skuRecord, quantity, eventId });
+    if (result.externalId && store.useLegacyShopifyIdColumn && (!skuRecord.ShopifyID || result.replaceLegacyShopifyId) && typeof db.updateShopifyId === 'function') {
+      await db.updateShopifyId({ skuRecord, shopifyId: result.externalId });
+      skuRecord.ShopifyID = result.externalId;
+    }
+    return result;
+  }
+
+  if (marketplace === 'walmart') {
+    return syncWalmart({ config: config.walmart, skuRecord, quantity });
+  }
+
+  if (marketplace === 'amazon') {
+    return syncAmazon({ config: config.amazon, skuRecord, quantity });
+  }
+
+  throw new Error(`Unsupported retry marketplace: ${marketplace}`);
+}
+
+export async function retryFailedSyncResult({ db, config, result }) {
+  const marketplace = result.marketplace;
+  const eventId = result.event_id;
+  const quantity = Number.parseInt(result.quantity ?? '0', 10) || 0;
+  const skuRecord = await db.findSkuRecord(result.square_catalog_object_id);
+
+  if (!skuRecord) {
+    throw new Error(`No SKU_Temp record found for Square catalog object ${result.square_catalog_object_id || '(missing)'}`);
+  }
+
+  const context = {
+    eventId,
+    squareCatalogObjectId: result.square_catalog_object_id,
+    barcode: getSkuCode(skuRecord),
+    sku: getSkuCode(skuRecord),
+    itemName: skuRecord.ItemName || result.item_name || null,
+    variantName: skuRecord.VarName || result.variant_name || null,
+    vendor: skuRecord.Vendor || result.vendor || null,
+    newQuantity: quantity,
+  };
+
+  try {
+    const syncResult = await syncMarketplace({ db, config, marketplace, skuRecord, quantity, eventId });
+    const message = resultMessage(syncResult, quantity);
+    await db.updateSyncResult?.({
+      id: result.id,
+      status: syncResult.status,
+      target: syncResult.externalId || result.target || null,
+      quantity: syncResult.quantity ?? quantity,
+      message,
+    });
+    logSyncResult({
+      context: { ...context, newQuantity: syncResult.quantity ?? quantity },
+      marketplace: `Retrying ${marketplace}`,
+      status: syncResult.status === 'success' ? 'complete' : syncResult.status,
+      target: syncResult.externalId,
+      message,
+    });
+    if (typeof db.hasFailedSyncResults === 'function' && !(await db.hasFailedSyncResults(eventId))) {
+      await db.markEventProcessed(eventId);
+    }
+    return { status: syncResult.status, marketplace, eventId, resultId: result.id };
+  } catch (error) {
+    const message = `retry set to ${quantity}; ${error.message}`;
+    await db.updateSyncResult?.({
+      id: result.id,
+      status: 'failed',
+      target: result.target || null,
+      quantity,
+      message,
+    });
+    logSyncResult({ context, marketplace: `Retrying ${marketplace}`, status: 'error', message });
+    throw error;
   }
 }
 
