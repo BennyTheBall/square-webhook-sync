@@ -58,3 +58,41 @@ test('upsertCatalogVariation records field history when inserting a catalog item
   const mainInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU`'));
   assert.equal(Object.hasOwn(mainInsert.params, 'Size'), false);
 });
+
+test('upsertCatalogVariation truncates parsed SKU_Temp detail fields to column limits', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR456',
+    itemName: 'Long Detail Item',
+    description: '',
+    category: 'Body',
+    sku: '123456789013',
+    gtin: '',
+    variationName: `${'S'.repeat(30)},${'C'.repeat(60)},${'T'.repeat(70)}`,
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
+  assert.equal(tempInsert.params.Size, 'S'.repeat(20));
+  assert.equal(tempInsert.params.Color, 'C'.repeat(50));
+  assert.equal(tempInsert.params.Style, 'T'.repeat(50));
+});

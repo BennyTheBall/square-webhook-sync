@@ -501,10 +501,14 @@ function parseVariationParts(variationName) {
     .map((part) => part.trim());
 
   return {
-    size: parts[0] || "",
-    color: parts[1] || "",
-    style: parts.slice(2).join(",") || "",
+    size: clampCatalogDetail(parts[0], 20),
+    color: clampCatalogDetail(parts[1], 50),
+    style: clampCatalogDetail(parts.slice(2).join(","), 50),
   };
+}
+
+function clampCatalogDetail(value, maxLength) {
+  return String(value || "").slice(0, maxLength);
 }
 
 export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, changedAt) {
