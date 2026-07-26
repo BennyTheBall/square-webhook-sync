@@ -58,5 +58,15 @@ CREATE TABLE IF NOT EXISTS square_catalog_sync_state (
   latest_time DATETIME NULL,
   latest_square_time VARCHAR(64) NULL,
   last_event_id VARCHAR(128) NULL,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS square_catalog_reconciliation_runs (
+  run_date DATE NOT NULL PRIMARY KEY,
+  status ENUM('running','completed','sent','failed') NOT NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  summary_json LONGTEXT NULL,
+  last_error TEXT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

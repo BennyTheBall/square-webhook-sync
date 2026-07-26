@@ -71,6 +71,53 @@ export async function getCurrentSquareQuantity({ config, catalogObjectId, locati
   return Math.max(0, Number.parseInt(count?.quantity ?? '0', 10) || 0);
 }
 
+export async function getSquareQuantitiesByCatalogObject({ config, catalogObjectIds, locationId }) {
+  const ids = [...new Set((catalogObjectIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  if (!config.square.accessToken) {
+    throw new Error('SQUARE_ACCESS_TOKEN is required to retrieve Square inventory counts');
+  }
+
+  const quantities = new Map(ids.map((id) => [id, 0]));
+  for (const batchIds of chunks(ids, 100)) {
+    let cursor;
+    do {
+      const body = {
+        catalog_object_ids: batchIds,
+        states: ['IN_STOCK'],
+      };
+      const effectiveLocationId = locationId || config.square.locationId;
+      if (effectiveLocationId) body.location_ids = [effectiveLocationId];
+      if (cursor) body.cursor = cursor;
+
+      const response = await fetch(`${config.square.apiBaseUrl}/v2/inventory/counts/batch-retrieve`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.square.accessToken}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'Square-Version': config.square.apiVersion || '2026-07-15',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(`Square inventory batch retrieve failed: ${response.status} ${JSON.stringify(payload).slice(0, 500)}`);
+      }
+
+      for (const count of payload.counts || []) {
+        if (count.state !== 'IN_STOCK' || !count.catalog_object_id) continue;
+        const quantity = Math.max(0, Number.parseInt(count.quantity ?? '0', 10) || 0);
+        quantities.set(count.catalog_object_id, (quantities.get(count.catalog_object_id) || 0) + quantity);
+      }
+      cursor = payload.cursor;
+    } while (cursor);
+  }
+
+  return quantities;
+}
+
 export async function retrieveCatalogObject({ config, objectId }) {
   if (!config.square.accessToken) {
     throw new Error('SQUARE_ACCESS_TOKEN is required to retrieve Square catalog objects');
@@ -210,4 +257,12 @@ function emptyToNull(value) {
 function stripHtml(value) {
   if (!value) return null;
   return String(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function chunks(items, size) {
+  const groups = [];
+  for (let index = 0; index < items.length; index += size) {
+    groups.push(items.slice(index, index + size));
+  }
+  return groups;
 }

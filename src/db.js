@@ -35,6 +35,10 @@ export function createDb(config) {
     getCatalogSyncState: () => getCatalogSyncState(pool, tables),
     markCatalogSyncState: (state) => markCatalogSyncState(pool, tables, state),
     upsertCatalogVariation: (variation) => upsertCatalogVariation(pool, tables, variation, new Date()),
+    getReconciliationRun: (runDate) => getReconciliationRun(pool, runDate),
+    markReconciliationRun: (run) => markReconciliationRun(pool, run),
+    listActiveCatalogRecords: () => listActiveCatalogRecords(pool, tables),
+    markMissingSquareCatalogDeleted: (record, changedAt) => markMissingSquareCatalogDeleted(pool, tables, record, changedAt),
     updateShopifyId: ({ skuRecord, shopifyId }) => updateShopifyId(pool, tables, skuRecord, shopifyId, new Date()),
     getShopifyToken: (storeKey) => getShopifyToken(pool, storeKey),
     saveShopifyToken: (token) => saveShopifyToken(pool, token),
@@ -247,6 +251,51 @@ export async function markCatalogSyncState(db, tables, state) {
   );
 }
 
+export async function getReconciliationRun(db, runDate) {
+  const [rows] = await db.execute(
+    `SELECT run_date, status, started_at, finished_at, summary_json, last_error
+       FROM square_catalog_reconciliation_runs
+      WHERE run_date = :runDate
+      LIMIT 1`,
+    { runDate }
+  );
+  return rows[0] || null;
+}
+
+export async function markReconciliationRun(db, run) {
+  await db.execute(
+    `INSERT INTO square_catalog_reconciliation_runs
+       (run_date, status, started_at, finished_at, summary_json, last_error)
+     VALUES
+       (:runDate, :status, :startedAt, :finishedAt, :summaryJson, :lastError)
+     ON DUPLICATE KEY UPDATE
+       status = VALUES(status),
+       started_at = COALESCE(VALUES(started_at), started_at),
+       finished_at = VALUES(finished_at),
+       summary_json = VALUES(summary_json),
+       last_error = VALUES(last_error)`,
+    {
+      runDate: run.runDate,
+      status: run.status,
+      startedAt: run.startedAt || null,
+      finishedAt: run.finishedAt || null,
+      summaryJson: JSON.stringify(run.summary || {}),
+      lastError: run.lastError ? String(run.lastError).slice(0, 5000) : null
+    }
+  );
+}
+
+export async function listActiveCatalogRecords(db, tables) {
+  const [rows] = await db.execute(
+    `SELECT ID, Token, SKU, ItemName, VarName, Deleted
+       FROM ${escapeId(tables.skuTemp || tables.sku)}
+      WHERE Deleted IS NULL
+        AND Token IS NOT NULL
+        AND Token <> ''`
+  );
+  return rows;
+}
+
 export async function upsertCatalogVariation(db, tables, variation, changedAt) {
   if (!variation.token) {
     return { status: "skipped", changed: false, message: "Missing Square variation token" };
@@ -324,6 +373,27 @@ async function markCatalogDeleted(db, tables, table, existing, variation, change
     await insertHistory(db, tables, existing.SKU || variation.sku || variation.token, "DELETED", existing.Deleted ?? "", String(deletedValue), changedAt);
   }
   return { changed: true };
+}
+
+export async function markMissingSquareCatalogDeleted(db, tables, record, changedAt) {
+  const tempRecord = await findCatalogRecord(db, tables.skuTemp || tables.sku, {
+    token: record.Token,
+    sku: record.SKU
+  });
+  const mainRecord = await findCatalogRecord(db, tables.skuMain || "SKU", {
+    token: record.Token,
+    sku: record.SKU
+  });
+  const variation = {
+    token: record.Token,
+    sku: record.SKU,
+    deleted: true
+  };
+  const tempResult = await markCatalogDeleted(db, tables, tables.skuTemp || tables.sku, tempRecord, variation, changedAt);
+  const mainResult = await markCatalogDeleted(db, tables, tables.skuMain || "SKU", mainRecord, variation, changedAt);
+  return {
+    changed: tempResult.changed || mainResult.changed
+  };
 }
 
 async function upsertCatalogTable(db, tables, table, kind, existing, variation, changedAt) {

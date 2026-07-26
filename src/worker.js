@@ -3,6 +3,7 @@ import { createDb } from './db.js';
 import { logger } from './logger.js';
 import { processSquareEvent, retryFailedSyncResult } from './processor.js';
 import { maybeSendDailySummary } from './summaryEmail.js';
+import { maybeRunCatalogReconciliation } from './reconciliation.js';
 
 const db = createDb(config);
 
@@ -41,6 +42,11 @@ async function main() {
       await maybeSendDailySummary({ db, config });
     } catch (error) {
       logger.error('Daily summary check failed', { error });
+    }
+    try {
+      await maybeRunCatalogReconciliation({ db, config });
+    } catch (error) {
+      logger.error('Catalog reconciliation check failed', { error });
     }
     await new Promise((resolve) => setTimeout(resolve, config.worker.intervalMs));
   }

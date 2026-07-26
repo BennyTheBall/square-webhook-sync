@@ -25,6 +25,9 @@ services:
         value: https://webhooks.thestrawberryshopyork.com/webhooks/square
       - key: SQUARE_API_VERSION
         value: "2026-07-15"
+      - key: SQUARE_LOCATION_ID
+        scope: RUN_TIME
+        type: SECRET
       - key: SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS
         value: "24"
       - key: SQUARE_CATALOG_EVENT_LOOKBACK_MINUTES
@@ -99,12 +102,28 @@ services:
         value: square_catalog_sync_state
       - key: WORKER_INTERVAL_MS
         value: "60000"
+      - key: RECONCILIATION_ENABLED
+        value: "true"
+      - key: RECONCILIATION_TIME
+        value: "07:00"
+      - key: RECONCILIATION_TIMEZONE
+        value: America/New_York
+      - key: RECONCILIATION_EMAIL_ENABLED
+        value: "true"
       - key: SUMMARY_EMAIL_ENABLED
         value: "false"
       - key: SUMMARY_EMAIL_TIME
         value: "23:55"
       - key: SUMMARY_EMAIL_TIMEZONE
         value: America/New_York
+      - key: RECONCILIATION_ENABLED
+        value: "true"
+      - key: RECONCILIATION_TIME
+        value: "07:00"
+      - key: RECONCILIATION_TIMEZONE
+        value: America/New_York
+      - key: RECONCILIATION_EMAIL_ENABLED
+        value: "true"
       - key: SUMMARY_EMAIL_FROM
         scope: RUN_TIME
         type: SECRET

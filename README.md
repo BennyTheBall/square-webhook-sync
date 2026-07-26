@@ -96,6 +96,32 @@ Each `catalog.version.updated` event runs from the saved `square_catalog_sync_st
 
 For production reliability, run the web service plus the retry worker. The worker reprocesses events that were claimed but failed during marketplace sync.
 
+## Daily Square Catalog Reconciliation
+
+The retry worker also runs a live Square catalog reconciliation once per day at `RECONCILIATION_TIME`, defaulting to `07:00` in `America/New_York`.
+
+This job replaces the old dump-file catalog loader flow with live Square API reads:
+
+- Reads every Square `ITEM_VARIATION` with `include_deleted_objects=true`, one page at a time.
+- Retrieves inventory counts in batches with `POST /v2/inventory/counts/batch-retrieve`.
+- Compares and updates `SKU` and `SKU_Temp` for token, item name, description, category, SKU, GTIN, variation name, price, cost, vendor, quantity, alert fields, tax, and deletion status.
+- Populates `SKU_Temp.Size`, `SKU_Temp.Color`, and `SKU_Temp.Style` from comma-separated variation names.
+- Writes `SKU_History` rows for every changed field, including inserts and deletions.
+- Marks active local records deleted if their Square token is not present in the full live Square catalog.
+- Sends a completion email using the existing `SUMMARY_EMAIL_FROM`, `SUMMARY_EMAIL_TO`, and SMTP settings.
+
+Optional reconciliation settings:
+
+```text
+RECONCILIATION_ENABLED=true
+RECONCILIATION_TIME=07:00
+RECONCILIATION_TIMEZONE=America/New_York
+RECONCILIATION_EMAIL_ENABLED=true
+SQUARE_LOCATION_ID=
+```
+
+Set `SQUARE_LOCATION_ID` when inventory should be reconciled against one Square location. If it is blank, Square inventory counts are summed across returned `IN_STOCK` counts.
+
 ## Daily Database Sync
 
 The easiest automation is to keep the manual Square dump into local MySQL, then run one local script after that import finishes. It dumps `Strawberry` from `mserver` and imports it directly into DigitalOcean Managed MySQL.

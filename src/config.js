@@ -17,6 +17,7 @@ export function loadConfig() {
       notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || "",
       apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com",
       apiVersion: process.env.SQUARE_API_VERSION || "2026-07-15",
+      locationId: process.env.SQUARE_LOCATION_ID || "",
       catalogInitialLookbackHours: numberFromEnv("SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS", 24),
       catalogEventLookbackMinutes: numberFromEnv("SQUARE_CATALOG_EVENT_LOOKBACK_MINUTES", 10),
       catalogPageLimit: numberFromEnv("SQUARE_CATALOG_PAGE_LIMIT", 100)
@@ -40,6 +41,12 @@ export function loadConfig() {
     worker: {
       limit: numberFromEnv("WORKER_LIMIT", 25),
       intervalMs: numberFromEnv("WORKER_INTERVAL_MS", 60000)
+    },
+    reconciliation: {
+      enabled: boolFromEnv("RECONCILIATION_ENABLED", true),
+      time: process.env.RECONCILIATION_TIME || "07:00",
+      timezone: process.env.RECONCILIATION_TIMEZONE || "America/New_York",
+      emailEnabled: boolFromEnv("RECONCILIATION_EMAIL_ENABLED", true)
     },
     summaryEmail: {
       enabled: boolFromEnv("SUMMARY_EMAIL_ENABLED", false),
