@@ -4,6 +4,7 @@ import {
   getCurrentSquareQuantity,
   isCatalogVersionUpdated,
   normalizeCatalogVariations,
+  retrieveCatalogObject,
   searchChangedCatalogObjectPages,
 } from './square.js';
 import { syncShopifyStore } from './marketplaces/shopify.js';
@@ -379,6 +380,7 @@ export async function processCatalogEvent({ db, config, eventId, payload }) {
     for (const variation of variations) {
       try {
         if (!variation.deleted) {
+          await hydrateMissingCatalogFields({ config, variation });
           variation.quantity = await getCurrentSquareQuantity({
             config,
             catalogObjectId: variation.token,
@@ -496,4 +498,11 @@ function latestCatalogTime(variations, fallback) {
     .filter(Boolean)
     .sort()
     .at(-1) || fallback || new Date().toISOString();
+}
+
+async function hydrateMissingCatalogFields({ config, variation }) {
+  if (!variation.category && variation.categoryId) {
+    const category = await retrieveCatalogObject({ config, objectId: variation.categoryId });
+    variation.category = category?.category_data?.name || variation.categoryId;
+  }
 }

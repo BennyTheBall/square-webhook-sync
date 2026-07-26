@@ -71,6 +71,26 @@ export async function getCurrentSquareQuantity({ config, catalogObjectId, locati
   return Math.max(0, Number.parseInt(count?.quantity ?? '0', 10) || 0);
 }
 
+export async function retrieveCatalogObject({ config, objectId }) {
+  if (!config.square.accessToken) {
+    throw new Error('SQUARE_ACCESS_TOKEN is required to retrieve Square catalog objects');
+  }
+
+  const response = await fetch(`${config.square.apiBaseUrl}/v2/catalog/object/${encodeURIComponent(objectId)}`, {
+    headers: {
+      Authorization: `Bearer ${config.square.accessToken}`,
+      Accept: 'application/json',
+      'Square-Version': config.square.apiVersion || '2026-07-15',
+    },
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(`Square catalog object retrieve failed: ${response.status} ${JSON.stringify(body).slice(0, 500)}`);
+  }
+  return body.object || null;
+}
+
 export function isCatalogVersionUpdated(payload) {
   return payload?.type === 'catalog.version.updated';
 }
@@ -155,6 +175,7 @@ export function normalizeCatalogVariation(object, relatedById = new Map()) {
     itemName: emptyToNull(itemData.name),
     description: emptyToNull(itemData.description_plaintext || itemData.description || stripHtml(itemData.description_html)),
     category: emptyToNull(category?.category_data?.name || itemData.reporting_category?.name),
+    categoryId,
     sku: emptyToNull(variation.sku),
     gtin: emptyToNull(variation.upc),
     variationName: emptyToNull(variation.name),

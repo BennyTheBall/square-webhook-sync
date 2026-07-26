@@ -32,14 +32,19 @@ test('processSquareEvent syncs catalog.version.updated into local catalog tables
           item_data: {
             name: 'Catalog Item',
             description: 'Description',
-            category_id: 'CAT123',
+            categories: [{ id: 'CAT123' }],
             tax_ids: ['TAX123'],
           },
-        }, {
+        }],
+      });
+    }
+    if (String(url).includes('/v2/catalog/object/CAT123')) {
+      return jsonResponse({
+        object: {
           type: 'CATEGORY',
           id: 'CAT123',
           category_data: { name: 'Category' },
-        }],
+        },
       });
     }
     if (String(url).includes('/v2/inventory/VAR123')) {

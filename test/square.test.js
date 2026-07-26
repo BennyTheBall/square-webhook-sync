@@ -122,6 +122,7 @@ test('normalizes catalog variation fields used by Strawberry tables', () => {
     itemName: 'Test Item',
     description: 'A useful thing',
     category: 'Gifts',
+    categoryId: 'CAT123',
     sku: '718806010009',
     gtin: '000718806010009',
     variationName: 'Small',
