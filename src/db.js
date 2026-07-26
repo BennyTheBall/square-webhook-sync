@@ -344,8 +344,13 @@ async function findCatalogRecord(db, table, variation) {
   const [rows] = await db.execute(
     `SELECT *
        FROM ${escapeId(table)}
-      WHERE Token = :token OR SKU = :sku
-      ORDER BY CASE WHEN Token = :token THEN 0 ELSE 1 END, ID DESC
+      WHERE (:sku <> '' AND SKU = :sku) OR Token = :token
+      ORDER BY CASE
+          WHEN :sku <> '' AND SKU = :sku THEN 0
+          WHEN Token = :token THEN 1
+          ELSE 2
+        END,
+        ID DESC
       LIMIT 1`,
     { token: variation.token, sku: variation.sku || "" }
   );

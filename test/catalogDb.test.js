@@ -134,3 +134,40 @@ test('upsertCatalogVariation treats comma-less variation names as style', async 
   assert.equal(tempInsert.params.Color, '');
   assert.equal(tempInsert.params.Style, 'Mimic');
 });
+
+test('upsertCatalogVariation prefers matching existing SKU rows before token rows', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR-SKU-FIRST',
+    itemName: 'SKU First Item',
+    description: '',
+    category: 'Body',
+    sku: '123456789015',
+    gtin: '',
+    variationName: 'Mimic',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const lookup = statements.find((statement) => statement.sql.includes('SELECT *') && statement.sql.includes('SKU_Temp'));
+  assert.match(lookup.sql, /WHEN :sku <> '' AND SKU = :sku THEN 0/);
+  assert.match(lookup.sql, /WHEN Token = :token THEN 1/);
+});
