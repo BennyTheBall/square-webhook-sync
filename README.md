@@ -92,7 +92,7 @@ Minimum runtime secrets:
 
 Add marketplace credentials only for channels you enable.
 
-The first `catalog.version.updated` event runs from the saved `square_catalog_sync_state` cursor. If no cursor exists, the service uses `SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS`, defaulting to 24 hours, so a new webhook subscription does not force a full-catalog import on the small App Platform instance. After each successful run it stores the latest Square update timestamp and only requests changed catalog objects. Catalog searches are processed one page at a time with `include_deleted_objects=true`.
+Each `catalog.version.updated` event runs from the saved `square_catalog_sync_state` cursor. If no cursor exists yet, the service starts from the event timestamp minus `SQUARE_CATALOG_EVENT_LOOKBACK_MINUTES`, defaulting to 10 minutes. The hourly fallback is only for malformed Square timestamps. After each successful run it stores the latest Square update timestamp and only requests changed catalog objects. Catalog searches are processed one page at a time with `include_deleted_objects=true`.
 
 For production reliability, run the web service plus the retry worker. The worker reprocesses events that were claimed but failed during marketplace sync.
 

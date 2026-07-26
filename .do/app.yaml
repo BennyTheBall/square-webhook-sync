@@ -27,6 +27,8 @@ services:
         value: "2026-07-15"
       - key: SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS
         value: "24"
+      - key: SQUARE_CATALOG_EVENT_LOOKBACK_MINUTES
+        value: "10"
       - key: SQUARE_CATALOG_PAGE_LIMIT
         value: "100"
       - key: SQUARE_ACCESS_TOKEN

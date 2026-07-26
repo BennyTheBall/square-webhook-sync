@@ -352,8 +352,8 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
 
 export async function processCatalogEvent({ db, config, eventId, payload }) {
   const state = typeof db.getCatalogSyncState === 'function' ? await db.getCatalogSyncState() : null;
-  const beginTime = catalogBeginTime({ config, state });
   const webhookUpdatedAt = getCatalogWebhookUpdatedAt(payload);
+  const beginTime = catalogBeginTime({ config, state, fallbackTime: webhookUpdatedAt || payload?.created_at });
 
   const failures = [];
   let changedCount = 0;
@@ -473,9 +473,16 @@ export async function processCatalogEvent({ db, config, eventId, payload }) {
   return { processedCount, changedCount };
 }
 
-function catalogBeginTime({ config, state }) {
+function catalogBeginTime({ config, state, fallbackTime }) {
   if (state?.latest_square_time) return state.latest_square_time;
   if (state?.latest_time) return new Date(state.latest_time).toISOString();
+  if (fallbackTime) {
+    const eventTime = new Date(fallbackTime).getTime();
+    if (Number.isFinite(eventTime)) {
+      const lookbackMinutes = config.square.catalogEventLookbackMinutes;
+      return new Date(eventTime - lookbackMinutes * 60 * 1000).toISOString();
+    }
+  }
   const lookbackHours = config.square.catalogInitialLookbackHours;
   if (lookbackHours > 0) {
     return new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();

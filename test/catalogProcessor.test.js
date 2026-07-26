@@ -98,6 +98,55 @@ test('processSquareEvent syncs catalog.version.updated into local catalog tables
   }
 });
 
+test('first catalog event without cursor uses a small event-time lookback', async () => {
+  const calls = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+    if (String(url).endsWith('/v2/catalog/search')) {
+      return jsonResponse({ objects: [], related_objects: [] });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  };
+
+  const db = {
+    markEventProcessing: async () => {},
+    getCatalogSyncState: async () => null,
+    markCatalogSyncState: async () => {},
+    markEventProcessed: async () => {},
+    markEventFailed: async () => assert.fail('catalog event should not fail'),
+  };
+
+  try {
+    await processSquareEvent({
+      db,
+      config: {
+        square: {
+          accessToken: 'token',
+          apiBaseUrl: 'https://connect.squareup.com',
+          apiVersion: '2026-07-15',
+          catalogInitialLookbackHours: 24,
+          catalogEventLookbackMinutes: 10,
+          catalogPageLimit: 100,
+        },
+        shopify: { stores: [] },
+        walmart: { enabled: false },
+        amazon: { enabled: false },
+      },
+      eventId: 'evt-catalog-no-cursor',
+      payload: {
+        type: 'catalog.version.updated',
+        event_id: 'evt-catalog-no-cursor',
+        data: { object: { catalog_version: { updated_at: '2026-07-26T12:00:00Z' } } },
+      },
+    });
+
+    assert.equal(calls.find((call) => call.body)?.body.begin_time, '2026-07-26T11:50:00.000Z');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 function jsonResponse(body, status = 200) {
   return {
     ok: status >= 200 && status < 300,
