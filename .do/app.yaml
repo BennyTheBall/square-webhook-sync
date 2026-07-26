@@ -25,6 +25,10 @@ services:
         value: https://webhooks.thestrawberryshopyork.com/webhooks/square
       - key: SQUARE_API_VERSION
         value: "2026-07-15"
+      - key: SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS
+        value: "24"
+      - key: SQUARE_CATALOG_PAGE_LIMIT
+        value: "100"
       - key: SQUARE_ACCESS_TOKEN
         scope: RUN_TIME
         type: SECRET

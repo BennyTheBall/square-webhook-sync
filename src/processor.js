@@ -4,7 +4,7 @@ import {
   getCurrentSquareQuantity,
   isCatalogVersionUpdated,
   normalizeCatalogVariations,
-  searchChangedCatalogObjects,
+  searchChangedCatalogObjectPages,
 } from './square.js';
 import { syncShopifyStore } from './marketplaces/shopify.js';
 import { syncWalmart } from './marketplaces/walmart.js';
@@ -355,89 +355,101 @@ export async function processCatalogEvent({ db, config, eventId, payload }) {
   const beginTime = catalogBeginTime({ config, state });
   const webhookUpdatedAt = getCatalogWebhookUpdatedAt(payload);
 
-  const { objects, relatedObjects } = await searchChangedCatalogObjects({ config, beginTime });
-  const variations = normalizeCatalogVariations({ objects, relatedObjects });
   const failures = [];
   let changedCount = 0;
+  let processedCount = 0;
+  let latestProcessedTime = webhookUpdatedAt || null;
+  let pageCount = 0;
 
   logger.info('Square catalog sync started', {
     eventId,
     beginTime,
-    objectCount: objects.length,
-    variationCount: variations.length,
   });
 
-  for (const variation of variations) {
-    try {
-      if (!variation.deleted) {
-        variation.quantity = await getCurrentSquareQuantity({
-          config,
+  for await (const page of searchChangedCatalogObjectPages({ config, beginTime })) {
+    pageCount += 1;
+    const variations = normalizeCatalogVariations(page);
+    logger.info('Square catalog sync page received', {
+      eventId,
+      pageCount,
+      objectCount: page.objects.length,
+      variationCount: variations.length,
+    });
+
+    for (const variation of variations) {
+      try {
+        if (!variation.deleted) {
+          variation.quantity = await getCurrentSquareQuantity({
+            config,
+            catalogObjectId: variation.token,
+          });
+        }
+        const result = await db.upsertCatalogVariation(variation);
+        processedCount += 1;
+        latestProcessedTime = latestCatalogTime([variation], latestProcessedTime);
+        if (result.changed) changedCount += 1;
+        await recordResult(db, {
+          eventId,
           catalogObjectId: variation.token,
+          sku: variation.sku,
+          marketplace: 'local-catalog',
+          status: result.status,
+          quantity: null,
+          message: result.message,
+        }, {
+          eventId,
+          squareCatalogObjectId: variation.token,
+          sku: variation.sku,
+          itemName: variation.itemName,
+          variantName: variation.variationName,
+          vendor: variation.vendor,
+          newQuantity: null,
+        });
+        logSyncResult({
+          context: {
+            eventId,
+            barcode: variation.sku || variation.token,
+            itemName: variation.itemName,
+            variantName: variation.variationName,
+            vendor: variation.vendor,
+          },
+          marketplace: 'Updating catalog tables',
+          status: result.status === 'success' ? 'complete' : result.status,
+          message: result.message,
+        });
+        if (result.status === 'failed') failures.push(new Error(`${variation.token}: ${result.message}`));
+      } catch (error) {
+        failures.push(error);
+        await recordResult(db, {
+          eventId,
+          catalogObjectId: variation.token,
+          sku: variation.sku,
+          marketplace: 'local-catalog',
+          status: 'failed',
+          quantity: null,
+          message: error.message,
+        }, {
+          eventId,
+          squareCatalogObjectId: variation.token,
+          sku: variation.sku,
+          itemName: variation.itemName,
+          variantName: variation.variationName,
+          vendor: variation.vendor,
+          newQuantity: null,
+        });
+        logSyncResult({
+          context: {
+            eventId,
+            barcode: variation.sku || variation.token,
+            itemName: variation.itemName,
+            variantName: variation.variationName,
+            vendor: variation.vendor,
+          },
+          marketplace: 'Updating catalog tables',
+          status: 'error',
+          message: error.message,
         });
       }
-      const result = await db.upsertCatalogVariation(variation);
-      if (result.changed) changedCount += 1;
-      await recordResult(db, {
-        eventId,
-        catalogObjectId: variation.token,
-        sku: variation.sku,
-        marketplace: 'local-catalog',
-        status: result.status,
-        quantity: null,
-        message: result.message,
-      }, {
-        eventId,
-        squareCatalogObjectId: variation.token,
-        sku: variation.sku,
-        itemName: variation.itemName,
-        variantName: variation.variationName,
-        vendor: variation.vendor,
-        newQuantity: null,
-      });
-      logSyncResult({
-        context: {
-          eventId,
-          barcode: variation.sku || variation.token,
-          itemName: variation.itemName,
-          variantName: variation.variationName,
-          vendor: variation.vendor,
-        },
-        marketplace: 'Updating catalog tables',
-        status: result.status === 'success' ? 'complete' : result.status,
-        message: result.message,
-      });
-      if (result.status === 'failed') failures.push(new Error(`${variation.token}: ${result.message}`));
-    } catch (error) {
-      failures.push(error);
-      await recordResult(db, {
-        eventId,
-        catalogObjectId: variation.token,
-        sku: variation.sku,
-        marketplace: 'local-catalog',
-        status: 'failed',
-        quantity: null,
-        message: error.message,
-      }, {
-        eventId,
-        squareCatalogObjectId: variation.token,
-        sku: variation.sku,
-        itemName: variation.itemName,
-        variantName: variation.variationName,
-        vendor: variation.vendor,
-        newQuantity: null,
-      });
-      logSyncResult({
-        context: {
-          eventId,
-          barcode: variation.sku || variation.token,
-          itemName: variation.itemName,
-          variantName: variation.variationName,
-          vendor: variation.vendor,
-        },
-        marketplace: 'Updating catalog tables',
-        status: 'error',
-        message: error.message,
-      });
     }
   }
 
@@ -448,7 +460,7 @@ export async function processCatalogEvent({ db, config, eventId, payload }) {
   }
 
   if (typeof db.markCatalogSyncState === 'function') {
-    const latestTime = latestCatalogTime(variations, webhookUpdatedAt);
+    const latestTime = latestProcessedTime || new Date().toISOString();
     await db.markCatalogSyncState({
       latestTime,
       latestSquareTime: latestTime,
@@ -456,9 +468,9 @@ export async function processCatalogEvent({ db, config, eventId, payload }) {
     });
   }
 
-  await db.markEventProcessed(eventId, { processedCount: variations.length });
-  logger.info('Square catalog event processed', { eventId, processedCount: variations.length, changedCount });
-  return { processedCount: variations.length, changedCount };
+  await db.markEventProcessed(eventId, { processedCount });
+  logger.info('Square catalog event processed', { eventId, processedCount, changedCount, pageCount });
+  return { processedCount, changedCount };
 }
 
 function catalogBeginTime({ config, state }) {

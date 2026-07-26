@@ -17,7 +17,8 @@ export function loadConfig() {
       notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || "",
       apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com",
       apiVersion: process.env.SQUARE_API_VERSION || "2026-07-15",
-      catalogInitialLookbackHours: numberFromEnv("SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS", 0)
+      catalogInitialLookbackHours: numberFromEnv("SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS", 24),
+      catalogPageLimit: numberFromEnv("SQUARE_CATALOG_PAGE_LIMIT", 100)
     },
     shopifyOauthStateSecret: process.env.SHOPIFY_OAUTH_STATE_SECRET || process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
     mysql: {

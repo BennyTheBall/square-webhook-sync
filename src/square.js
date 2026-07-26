@@ -80,19 +80,31 @@ export function getCatalogWebhookUpdatedAt(payload) {
 }
 
 export async function searchChangedCatalogObjects({ config, beginTime }) {
+  const objects = [];
+  const relatedObjects = [];
+
+  for await (const page of searchChangedCatalogObjectPages({ config, beginTime })) {
+    objects.push(...page.objects);
+    relatedObjects.push(...page.relatedObjects);
+  }
+
+  return { objects, relatedObjects };
+}
+
+export async function* searchChangedCatalogObjectPages({ config, beginTime }) {
   if (!config.square.accessToken) {
     throw new Error('SQUARE_ACCESS_TOKEN is required to sync Square catalog changes');
   }
 
-  const objects = [];
-  const relatedObjects = [];
   let cursor;
+  const limit = Math.max(1, Math.min(1000, Number.parseInt(config.square.catalogPageLimit || '100', 10) || 100));
 
   do {
     const body = {
       object_types: ['ITEM_VARIATION'],
       include_deleted_objects: true,
       include_related_objects: true,
+      limit,
     };
     if (beginTime) body.begin_time = beginTime;
     if (cursor) body.cursor = cursor;
@@ -113,12 +125,12 @@ export async function searchChangedCatalogObjects({ config, beginTime }) {
       throw new Error(`Square catalog search failed: ${response.status} ${JSON.stringify(payload).slice(0, 500)}`);
     }
 
-    objects.push(...(payload.objects || []));
-    relatedObjects.push(...(payload.related_objects || []));
+    yield {
+      objects: payload.objects || [],
+      relatedObjects: payload.related_objects || [],
+    };
     cursor = payload.cursor;
   } while (cursor);
-
-  return { objects, relatedObjects };
 }
 
 export function normalizeCatalogVariations({ objects, relatedObjects }) {
