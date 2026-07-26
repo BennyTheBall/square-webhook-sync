@@ -1,9 +1,16 @@
 import crypto from 'node:crypto';
 
-export function verifySquareSignature({ signatureKey, notificationUrl, rawBody, signature }) {
-  if (!signatureKey || !notificationUrl || !rawBody || !signature) {
+export function verifySquareSignature({ signatureKey, signatureKeys, notificationUrl, rawBody, signature }) {
+  const keys = signatureKeys?.length ? signatureKeys : [signatureKey].filter(Boolean);
+  if (!keys.length || !notificationUrl || !rawBody || !signature) {
     return false;
   }
+
+  return keys.some((key) => verifySquareSignatureWithKey({ signatureKey: key, notificationUrl, rawBody, signature }));
+}
+
+function verifySquareSignatureWithKey({ signatureKey, notificationUrl, rawBody, signature }) {
+  if (!signatureKey) return false;
 
   const hmac = crypto
     .createHmac('sha256', signatureKey)

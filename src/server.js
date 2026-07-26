@@ -92,7 +92,7 @@ app.post('/webhooks/square', express.raw({ type: '*/*', limit: '2mb' }), async (
   const signature = req.get('x-square-hmacsha256-signature');
 
   const validSignature = verifySquareSignature({
-    signatureKey: config.square.signatureKey,
+    signatureKeys: config.square.signatureKeys,
     notificationUrl: config.square.notificationUrl,
     rawBody,
     signature,

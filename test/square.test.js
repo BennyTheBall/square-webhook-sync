@@ -22,6 +22,28 @@ test('verifies Square webhook signatures with notification URL and raw body', ()
   assert.equal(verifySquareSignature({ signatureKey, notificationUrl, rawBody: `${rawBody}\n`, signature }), false);
 });
 
+test('verifies Square webhook signatures against multiple keys', () => {
+  const notificationUrl = 'https://example.com/webhooks/square';
+  const rawBody = JSON.stringify({ event_id: 'evt_456' });
+  const signature = crypto
+    .createHmac('sha256', 'catalog-signature-key')
+    .update(notificationUrl + rawBody)
+    .digest('base64');
+
+  assert.equal(verifySquareSignature({
+    signatureKeys: ['inventory-signature-key', 'catalog-signature-key'],
+    notificationUrl,
+    rawBody,
+    signature,
+  }), true);
+  assert.equal(verifySquareSignature({
+    signatureKeys: ['inventory-signature-key', 'other-key'],
+    notificationUrl,
+    rawBody,
+    signature,
+  }), false);
+});
+
 test('extracts only in-stock inventory counts and clamps negative values', () => {
   const payload = {
     data: {

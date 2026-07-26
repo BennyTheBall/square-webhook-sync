@@ -13,6 +13,7 @@ export function loadConfig() {
     square: {
       accessToken: process.env.SQUARE_ACCESS_TOKEN || "",
       signatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
+      signatureKeys: parseList(process.env.SQUARE_WEBHOOK_SIGNATURE_KEYS || process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || ""),
       notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || "",
       apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com",
       apiVersion: process.env.SQUARE_API_VERSION || "2026-07-15",

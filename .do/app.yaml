@@ -63,6 +63,9 @@ services:
       - key: SQUARE_WEBHOOK_SIGNATURE_KEY
         scope: RUN_TIME
         type: SECRET
+      - key: SQUARE_WEBHOOK_SIGNATURE_KEYS
+        scope: RUN_TIME
+        type: SECRET
       - key: MYSQL_HOST
         scope: RUN_TIME
         type: SECRET

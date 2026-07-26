@@ -82,6 +82,7 @@ Minimum runtime secrets:
 
 - `SQUARE_ACCESS_TOKEN`
 - `SQUARE_WEBHOOK_SIGNATURE_KEY`
+- `SQUARE_WEBHOOK_SIGNATURE_KEYS` if inventory and catalog are configured as separate Square webhook subscriptions with separate signature keys; set it to both keys separated by commas.
 - `SQUARE_WEBHOOK_NOTIFICATION_URL`
 - `MYSQL_HOST`
 - `MYSQL_USER`
