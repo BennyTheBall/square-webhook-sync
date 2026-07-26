@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   extractInventoryCounts,
   getCatalogWebhookUpdatedAt,
+  getSquareQuantitiesByCatalogObject,
   isCatalogVersionUpdated,
   normalizeCatalogVariations,
   verifySquareSignature,
@@ -170,4 +171,44 @@ test('detects catalog.version.updated payloads and timestamp', () => {
 
   assert.equal(isCatalogVersionUpdated(payload), true);
   assert.equal(getCatalogWebhookUpdatedAt(payload), '2026-07-26T12:00:00Z');
+});
+
+test('retries transient Square fetch failures', async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw new TypeError('fetch failed');
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        counts: [{
+          state: 'IN_STOCK',
+          catalog_object_id: 'VAR123',
+          quantity: '4',
+        }],
+      }),
+    };
+  };
+
+  try {
+    const quantities = await getSquareQuantitiesByCatalogObject({
+      config: {
+        square: {
+          accessToken: 'token',
+          apiBaseUrl: 'https://connect.squareup.test',
+          apiVersion: '2026-07-15',
+        },
+      },
+      catalogObjectIds: ['VAR123'],
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(quantities.get('VAR123'), 4);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });

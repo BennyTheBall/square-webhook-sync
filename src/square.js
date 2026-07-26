@@ -53,7 +53,7 @@ export async function getCurrentSquareQuantity({ config, catalogObjectId, locati
     url.searchParams.set('location_ids', locationId);
   }
 
-  const response = await fetch(url, {
+  const response = await squareFetch(url, {
     headers: {
       Authorization: `Bearer ${config.square.accessToken}`,
       Accept: 'application/json',
@@ -90,7 +90,7 @@ export async function getSquareQuantitiesByCatalogObject({ config, catalogObject
       if (effectiveLocationId) body.location_ids = [effectiveLocationId];
       if (cursor) body.cursor = cursor;
 
-      const response = await fetch(`${config.square.apiBaseUrl}/v2/inventory/counts/batch-retrieve`, {
+      const response = await squareFetch(`${config.square.apiBaseUrl}/v2/inventory/counts/batch-retrieve`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${config.square.accessToken}`,
@@ -123,7 +123,7 @@ export async function retrieveCatalogObject({ config, objectId }) {
     throw new Error('SQUARE_ACCESS_TOKEN is required to retrieve Square catalog objects');
   }
 
-  const response = await fetch(`${config.square.apiBaseUrl}/v2/catalog/object/${encodeURIComponent(objectId)}`, {
+  const response = await squareFetch(`${config.square.apiBaseUrl}/v2/catalog/object/${encodeURIComponent(objectId)}`, {
     headers: {
       Authorization: `Bearer ${config.square.accessToken}`,
       Accept: 'application/json',
@@ -176,7 +176,7 @@ export async function* searchChangedCatalogObjectPages({ config, beginTime }) {
     if (beginTime) body.begin_time = beginTime;
     if (cursor) body.cursor = cursor;
 
-    const response = await fetch(`${config.square.apiBaseUrl}/v2/catalog/search`, {
+    const response = await squareFetch(`${config.square.apiBaseUrl}/v2/catalog/search`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.square.accessToken}`,
@@ -198,6 +198,29 @@ export async function* searchChangedCatalogObjectPages({ config, beginTime }) {
     };
     cursor = payload.cursor;
   } while (cursor);
+}
+
+async function squareFetch(url, options, attempt = 1) {
+  const maxAttempts = 4;
+  try {
+    const response = await fetch(url, options);
+    if (!isRetryableSquareStatus(response.status) || attempt >= maxAttempts) {
+      return response;
+    }
+  } catch (error) {
+    if (attempt >= maxAttempts) throw error;
+  }
+
+  await sleep(500 * 2 ** (attempt - 1));
+  return squareFetch(url, options, attempt + 1);
+}
+
+function isRetryableSquareStatus(status) {
+  return status === 429 || status >= 500;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function normalizeCatalogVariations({ objects, relatedObjects }) {
