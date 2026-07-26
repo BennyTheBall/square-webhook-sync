@@ -212,3 +212,50 @@ test('retries transient Square fetch failures', async () => {
     globalThis.fetch = previousFetch;
   }
 });
+
+test('times out and retries stalled Square requests', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousTimeout = process.env.SQUARE_FETCH_TIMEOUT_MS;
+  let calls = 0;
+  process.env.SQUARE_FETCH_TIMEOUT_MS = '10';
+  globalThis.fetch = async (_url, options = {}) => {
+    calls += 1;
+    if (calls === 1) {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ objects: [], related_objects: [] }),
+    };
+  };
+
+  try {
+    const pages = [];
+    for await (const page of (await import('../src/square.js')).searchChangedCatalogObjectPages({
+      config: {
+        square: {
+          accessToken: 'token',
+          apiBaseUrl: 'https://connect.squareup.test',
+          apiVersion: '2026-07-15',
+          catalogPageLimit: 100,
+        },
+      },
+      beginTime: null,
+    })) {
+      pages.push(page);
+    }
+
+    assert.equal(calls, 2);
+    assert.equal(pages.length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousTimeout == null) {
+      delete process.env.SQUARE_FETCH_TIMEOUT_MS;
+    } else {
+      process.env.SQUARE_FETCH_TIMEOUT_MS = previousTimeout;
+    }
+  }
+});

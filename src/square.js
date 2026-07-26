@@ -202,17 +202,27 @@ export async function* searchChangedCatalogObjectPages({ config, beginTime }) {
 
 async function squareFetch(url, options, attempt = 1) {
   const maxAttempts = 4;
+  const timeoutMs = squareFetchTimeoutMs();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeout);
     if (!isRetryableSquareStatus(response.status) || attempt >= maxAttempts) {
       return response;
     }
   } catch (error) {
+    clearTimeout(timeout);
     if (attempt >= maxAttempts) throw error;
   }
 
   await sleep(500 * 2 ** (attempt - 1));
   return squareFetch(url, options, attempt + 1);
+}
+
+function squareFetchTimeoutMs() {
+  const value = Number.parseInt(process.env.SQUARE_FETCH_TIMEOUT_MS || "30000", 10);
+  return Number.isFinite(value) && value > 0 ? value : 30000;
 }
 
 function isRetryableSquareStatus(status) {
