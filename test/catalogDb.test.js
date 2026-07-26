@@ -171,3 +171,73 @@ test('upsertCatalogVariation prefers matching existing SKU rows before token row
   assert.match(lookup.sql, /WHEN :sku <> '' AND SKU = :sku THEN 0/);
   assert.match(lookup.sql, /WHEN Token = :token THEN 1/);
 });
+
+test('upsertCatalogVariation clears stale deleted SKU token conflicts before updating current SKU', async () => {
+  const statements = [];
+  const currentValues = {
+    Token: 'NEW-TOKEN',
+    ItemName: 'SKU First Item',
+    Description: '',
+    Cat: 'Body',
+    SKU: '123456789016',
+    GTIN: '',
+    VarName: 'Mimic',
+    Price: '10.99',
+    Cost: '5.10',
+    Vendor: 'Vendor',
+    Quantity: 7,
+    AlertEnable: 'N',
+    AlertCount: null,
+    Tax: 'Y',
+    Remove: 'N',
+  };
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) {
+        return [[{ ID: 20, Deleted: null, Size: '', Color: '', Style: 'Mimic', ...currentValues }]];
+      }
+      if (sql.includes('SELECT *') && sql.includes('SKU')) {
+        return [[{ ID: 10, Deleted: 'Y', ...currentValues, Token: 'OLD-TOKEN' }]];
+      }
+      if (sql.includes('SELECT ID, SKU, Token, Deleted') && sql.includes('SKU')) {
+        return [[{ ID: 11, SKU: 'OLD-SKU', Token: 'NEW-TOKEN', Deleted: 'Y' }]];
+      }
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'NEW-TOKEN',
+    itemName: 'SKU First Item',
+    description: '',
+    category: 'Body',
+    sku: '123456789016',
+    gtin: '',
+    variationName: 'Mimic',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  assert.equal(statements.some((statement) =>
+    statement.sql.includes('UPDATE `SKU`') &&
+    statement.sql.includes('Token = :staleToken') &&
+    statement.params.staleToken === 'STALE-11'
+  ), true);
+  assert.equal(statements.some((statement) =>
+    statement.sql.includes('INSERT INTO `SKU_History`') &&
+    statement.params.sku === 'OLD-SKU' &&
+    statement.params.fieldName === 'Token' &&
+    statement.params.oldValue === 'NEW-TOKEN' &&
+    statement.params.newValue === 'STALE-11'
+  ), true);
+});

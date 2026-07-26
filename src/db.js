@@ -448,6 +448,10 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
     .filter(([field, value]) => !catalogValuesEqual(existing[field], value));
   if (!changedFields.length) return { inserted: false, changed: false };
 
+  if (kind === "main" && changedFields.some(([field]) => field === "Token")) {
+    await clearStaleTokenConflict(db, tables, table, existing, values.Token, changedAt);
+  }
+
   await db.execute(
     `UPDATE ${escapeId(table)}
         SET ${changedFields.map(([field]) => `${escapeId(field)} = :${field}`).join(", ")}
@@ -461,6 +465,33 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
     await insertCatalogFieldHistory(db, tables, historySku, changedFields, existing, changedAt);
   }
   return { inserted: false, changed: true };
+}
+
+async function clearStaleTokenConflict(db, tables, table, existing, token, changedAt) {
+  const [rows] = await db.execute(
+    `SELECT ID, SKU, Token, Deleted
+       FROM ${escapeId(table)}
+      WHERE Token = :token
+        AND ID <> :id
+      LIMIT 1`,
+    { token, id: existing.ID }
+  );
+  const conflict = rows[0];
+  if (!conflict) return;
+
+  if (String(conflict.Deleted || "N").toUpperCase() !== "Y") {
+    throw new Error(`Square token ${token} is already assigned to active SKU ${conflict.SKU || conflict.ID}`);
+  }
+
+  const staleToken = `STALE-${conflict.ID}`;
+  await db.execute(
+    `UPDATE ${escapeId(table)}
+        SET Token = :staleToken
+      WHERE ID = :id
+      LIMIT 1`,
+    { staleToken, id: conflict.ID }
+  );
+  await insertHistory(db, tables, conflict.SKU || conflict.ID, "Token", conflict.Token, staleToken, changedAt);
 }
 
 async function insertCatalogFieldHistory(db, tables, sku, fields, existing, changedAt) {
