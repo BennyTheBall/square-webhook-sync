@@ -328,6 +328,7 @@ async function markCatalogDeleted(db, tables, table, existing, variation, change
 
 async function upsertCatalogTable(db, tables, table, kind, existing, variation, changedAt) {
   const deletedValue = kind === "temp" ? null : "N";
+  const variantParts = parseVariationParts(variation.variationName);
   const values = {
     Token: variation.token,
     ItemName: variation.itemName,
@@ -346,6 +347,11 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
     Remove: "N",
     Deleted: deletedValue
   };
+  if (kind === "temp") {
+    values.Size = variantParts.size;
+    values.Color = variantParts.color;
+    values.Style = variantParts.style;
+  }
 
   if (!existing) {
     const columns = Object.keys(values);
@@ -358,6 +364,7 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
     );
     if (kind === "temp") {
       await insertHistory(db, tables, values.SKU, "INSERT", "", "Inserted from Square catalog", changedAt);
+      await insertCatalogFieldHistory(db, tables, values.SKU, Object.entries(values), {}, changedAt);
     }
     return { inserted: true, changed: true };
   }
@@ -376,12 +383,16 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
 
   const historySku = values.SKU || existing.SKU || variation.token;
   if (kind === "temp") {
-    for (const [field, value] of changedFields) {
-      if (field === "Remove") continue;
-      await insertHistory(db, tables, historySku, field, existing[field] ?? "", value ?? "", changedAt);
-    }
+    await insertCatalogFieldHistory(db, tables, historySku, changedFields, existing, changedAt);
   }
   return { inserted: false, changed: true };
+}
+
+async function insertCatalogFieldHistory(db, tables, sku, fields, existing, changedAt) {
+  for (const [field, value] of fields) {
+    if (field === "Remove" || field === "Deleted") continue;
+    await insertHistory(db, tables, sku, field, existing[field] ?? "", value ?? "", changedAt);
+  }
 }
 
 async function insertHistory(db, tables, sku, fieldName, oldValue, newValue, changedAt) {
@@ -412,6 +423,18 @@ function catalogValuesEqual(left, right) {
     return Math.abs(leftNumber - rightNumber) < 0.0001;
   }
   return String(left).trim() === String(right).trim();
+}
+
+function parseVariationParts(variationName) {
+  const parts = String(variationName || "")
+    .split(",")
+    .map((part) => part.trim());
+
+  return {
+    size: parts[0] || "",
+    color: parts[1] || "",
+    style: parts.slice(2).join(",") || "",
+  };
 }
 
 export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, changedAt) {
