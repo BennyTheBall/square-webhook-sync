@@ -138,8 +138,9 @@ export async function listFailedSyncResults(db, limit = 25) {
   const [rows] = await db.execute(
     `SELECT id, event_id, sku, square_catalog_object_id, item_name, variant_name,
             vendor, quantity, marketplace, target, status, message, created_at
-       FROM square_inventory_sync_results
+      FROM square_inventory_sync_results
       WHERE status = 'failed'
+        AND marketplace <> 'local-catalog'
       ORDER BY created_at ASC, id ASC
       LIMIT ${safeLimit}`
   );
