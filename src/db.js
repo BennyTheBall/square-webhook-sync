@@ -32,6 +32,9 @@ export function createDb(config) {
     hasFailedSyncResults: (eventId) => hasFailedSyncResults(pool, eventId),
     findSkuRecord: (squareToken) => findSkuRecord(pool, tables, squareToken),
     updateLocalQuantity: ({ skuRecord, quantity }) => updateLocalQuantity(pool, tables, skuRecord, quantity, new Date()),
+    getCatalogSyncState: () => getCatalogSyncState(pool, tables),
+    markCatalogSyncState: (state) => markCatalogSyncState(pool, tables, state),
+    upsertCatalogVariation: (variation) => upsertCatalogVariation(pool, tables, variation, new Date()),
     updateShopifyId: ({ skuRecord, shopifyId }) => updateShopifyId(pool, tables, skuRecord, shopifyId, new Date()),
     getShopifyToken: (storeKey) => getShopifyToken(pool, storeKey),
     saveShopifyToken: (token) => saveShopifyToken(pool, token),
@@ -176,7 +179,7 @@ export async function hasFailedSyncResults(db, eventId) {
 export async function findSkuRecord(db, tables, squareToken) {
   const [rows] = await db.execute(
     `SELECT ID, Token, SKU, ItemName, VarName, Quantity, ShopifyID, AmazonSKU, Vendor
-       FROM ${escapeId(tables.sku)}
+       FROM ${escapeId(tables.skuTemp || tables.sku)}
       WHERE Token = :squareToken AND Deleted IS NULL
       LIMIT 1`,
     { squareToken }
@@ -188,10 +191,17 @@ export async function updateLocalQuantity(db, tables, skuRecord, quantity, chang
   if (Number(skuRecord.Quantity) === Number(quantity)) return { changed: false };
 
   await db.execute(
-    `UPDATE ${escapeId(tables.sku)}
+    `UPDATE ${escapeId(tables.skuTemp || tables.sku)}
         SET Quantity = :quantity
       WHERE ID = :id`,
     { quantity, id: skuRecord.ID }
+  );
+
+  await db.execute(
+    `UPDATE ${escapeId(tables.skuMain || "SKU")}
+        SET Quantity = :quantity
+      WHERE Token = :token OR SKU = :sku`,
+    { quantity, token: skuRecord.Token, sku: skuRecord.SKU }
   );
 
   await db.execute(
@@ -206,6 +216,201 @@ export async function updateLocalQuantity(db, tables, skuRecord, quantity, chang
   );
 
   return { changed: true };
+}
+
+export async function getCatalogSyncState(db, tables) {
+  const [rows] = await db.execute(
+    `SELECT latest_time, latest_square_time, last_event_id
+       FROM ${escapeId(tables.catalogState)}
+      WHERE state_key = 'catalog'
+      LIMIT 1`
+  );
+  return rows[0] || null;
+}
+
+export async function markCatalogSyncState(db, tables, state) {
+  await db.execute(
+    `INSERT INTO ${escapeId(tables.catalogState)}
+       (state_key, latest_time, latest_square_time, last_event_id)
+     VALUES
+       ('catalog', :latestTime, :latestSquareTime, :lastEventId)
+     ON DUPLICATE KEY UPDATE
+       latest_time = VALUES(latest_time),
+       latest_square_time = VALUES(latest_square_time),
+       last_event_id = VALUES(last_event_id)`,
+    {
+      latestTime: state.latestTime ? new Date(state.latestTime) : null,
+      latestSquareTime: state.latestSquareTime || state.latestTime || null,
+      lastEventId: state.lastEventId || null
+    }
+  );
+}
+
+export async function upsertCatalogVariation(db, tables, variation, changedAt) {
+  if (!variation.token) {
+    return { status: "skipped", changed: false, message: "Missing Square variation token" };
+  }
+
+  const existingTemp = await findCatalogRecord(db, tables.skuTemp || tables.sku, variation);
+  const existingMain = await findCatalogRecord(db, tables.skuMain || "SKU", variation);
+
+  if (variation.deleted) {
+    const tempResult = await markCatalogDeleted(db, tables, tables.skuTemp || tables.sku, existingTemp, variation, changedAt);
+    const mainResult = await markCatalogDeleted(db, tables, tables.skuMain || "SKU", existingMain, variation, changedAt);
+    return {
+      status: tempResult.changed || mainResult.changed ? "success" : "skipped",
+      changed: tempResult.changed || mainResult.changed,
+      message: tempResult.changed || mainResult.changed ? "Marked deleted" : "Already deleted or not found"
+    };
+  }
+
+  const requiredMissing = [];
+  if (!variation.sku) requiredMissing.push("SKU");
+  if (!variation.itemName) requiredMissing.push("ItemName");
+  if (!variation.category) requiredMissing.push("Cat");
+  if (variation.price == null) requiredMissing.push("Price");
+  if (variation.cost == null) requiredMissing.push("Cost");
+  if (requiredMissing.length) {
+    return {
+      status: "failed",
+      changed: false,
+      message: `Missing required Square catalog fields: ${requiredMissing.join(", ")}`
+    };
+  }
+
+  const tempResult = await upsertCatalogTable(db, tables, tables.skuTemp || tables.sku, "temp", existingTemp, variation, changedAt);
+  const mainResult = await upsertCatalogTable(db, tables, tables.skuMain || "SKU", "main", existingMain, variation, changedAt);
+
+  return {
+    status: "success",
+    changed: tempResult.changed || mainResult.changed,
+    message: tempResult.inserted || mainResult.inserted
+      ? "Inserted/updated from Square catalog"
+      : (tempResult.changed || mainResult.changed ? "Updated from Square catalog" : "Already current")
+  };
+}
+
+async function findCatalogRecord(db, table, variation) {
+  const [rows] = await db.execute(
+    `SELECT *
+       FROM ${escapeId(table)}
+      WHERE Token = :token OR SKU = :sku
+      ORDER BY CASE WHEN Token = :token THEN 0 ELSE 1 END, ID DESC
+      LIMIT 1`,
+    { token: variation.token, sku: variation.sku || "" }
+  );
+  return rows[0] || null;
+}
+
+async function markCatalogDeleted(db, tables, table, existing, variation, changedAt) {
+  if (!existing) return { changed: false };
+
+  const deletedValue = table === (tables.skuTemp || tables.sku) ? existing.ID : "Y";
+  const isDeleted = table === (tables.skuTemp || tables.sku)
+    ? existing.Deleted != null
+    : String(existing.Deleted || "N").toUpperCase() === "Y";
+
+  if (isDeleted) return { changed: false };
+
+  await db.execute(
+    `UPDATE ${escapeId(table)}
+        SET Deleted = :deleted, Remove = 'Y'
+      WHERE ID = :id
+      LIMIT 1`,
+    { deleted: deletedValue, id: existing.ID }
+  );
+  if (table === (tables.skuTemp || tables.sku)) {
+    await insertHistory(db, tables, existing.SKU || variation.sku || variation.token, "DELETED", existing.Deleted ?? "", String(deletedValue), changedAt);
+  }
+  return { changed: true };
+}
+
+async function upsertCatalogTable(db, tables, table, kind, existing, variation, changedAt) {
+  const deletedValue = kind === "temp" ? null : "N";
+  const values = {
+    Token: variation.token,
+    ItemName: variation.itemName,
+    Description: variation.description || "",
+    Cat: variation.category,
+    SKU: variation.sku,
+    GTIN: variation.gtin || "",
+    VarName: variation.variationName || "",
+    Price: variation.price,
+    Cost: variation.cost,
+    Vendor: variation.vendor || "",
+    Quantity: variation.quantity ?? existing?.Quantity ?? 0,
+    AlertEnable: variation.alertEnabled || "N",
+    AlertCount: variation.alertCount ?? null,
+    Tax: variation.tax || existing?.Tax || "Y",
+    Remove: "N",
+    Deleted: deletedValue
+  };
+
+  if (!existing) {
+    const columns = Object.keys(values);
+    await db.execute(
+      `INSERT INTO ${escapeId(table)}
+         (${columns.map(escapeId).join(", ")})
+       VALUES
+         (${columns.map((column) => `:${column}`).join(", ")})`,
+      values
+    );
+    if (kind === "temp") {
+      await insertHistory(db, tables, values.SKU, "INSERT", "", "Inserted from Square catalog", changedAt);
+    }
+    return { inserted: true, changed: true };
+  }
+
+  const changedFields = Object.entries(values)
+    .filter(([field, value]) => !catalogValuesEqual(existing[field], value));
+  if (!changedFields.length) return { inserted: false, changed: false };
+
+  await db.execute(
+    `UPDATE ${escapeId(table)}
+        SET ${changedFields.map(([field]) => `${escapeId(field)} = :${field}`).join(", ")}
+      WHERE ID = :ID
+      LIMIT 1`,
+    { ...Object.fromEntries(changedFields), ID: existing.ID }
+  );
+
+  const historySku = values.SKU || existing.SKU || variation.token;
+  if (kind === "temp") {
+    for (const [field, value] of changedFields) {
+      if (field === "Remove") continue;
+      await insertHistory(db, tables, historySku, field, existing[field] ?? "", value ?? "", changedAt);
+    }
+  }
+  return { inserted: false, changed: true };
+}
+
+async function insertHistory(db, tables, sku, fieldName, oldValue, newValue, changedAt) {
+  await db.execute(
+    `INSERT INTO ${escapeId(tables.skuHistory)}
+       SET SKU = :sku, FieldName = :fieldName, OldValue = :oldValue, NewValue = :newValue, Changed = :changed`,
+    {
+      sku: String(sku || "").slice(0, 20),
+      fieldName: String(fieldName || "").slice(0, 20),
+      oldValue: stringifyHistoryValue(oldValue),
+      newValue: stringifyHistoryValue(newValue),
+      changed: changedAt
+    }
+  );
+}
+
+function stringifyHistoryValue(value) {
+  if (value == null) return "";
+  return String(value).slice(0, 255);
+}
+
+function catalogValuesEqual(left, right) {
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return Math.abs(leftNumber - rightNumber) < 0.0001;
+  }
+  return String(left).trim() === String(right).trim();
 }
 
 export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, changedAt) {

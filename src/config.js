@@ -14,7 +14,9 @@ export function loadConfig() {
       accessToken: process.env.SQUARE_ACCESS_TOKEN || "",
       signatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
       notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || "",
-      apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com"
+      apiBaseUrl: process.env.SQUARE_API_BASE_URL || "https://connect.squareup.com",
+      apiVersion: process.env.SQUARE_API_VERSION || "2026-07-15",
+      catalogInitialLookbackHours: numberFromEnv("SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS", 0)
     },
     shopifyOauthStateSecret: process.env.SHOPIFY_OAUTH_STATE_SECRET || process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
     mysql: {
@@ -26,8 +28,11 @@ export function loadConfig() {
     },
     tables: {
       sku: process.env.SKU_TABLE || "SKU_Temp",
+      skuTemp: process.env.SKU_TEMP_TABLE || process.env.SKU_TABLE || "SKU_Temp",
+      skuMain: process.env.SKU_MAIN_TABLE || "SKU",
       skuHistory: process.env.SKU_HISTORY_TABLE || "SKU_History",
-      webhook: process.env.WEBHOOK_TABLE || "square_webhook_events"
+      webhook: process.env.WEBHOOK_TABLE || "square_webhook_events",
+      catalogState: process.env.CATALOG_STATE_TABLE || "square_catalog_sync_state"
     },
     worker: {
       limit: numberFromEnv("WORKER_LIMIT", 25),

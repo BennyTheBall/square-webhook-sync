@@ -1,6 +1,6 @@
 # Square Webhook Sync
 
-Replacement for the hand-coded Square inventory webhook processor. It accepts Square `inventory.count.updated` events, prevents duplicate processing, updates the existing Strawberry database tables, and syncs the resulting quantity to Shopify, Walmart, and Amazon.
+Replacement for the hand-coded Square inventory webhook processor. It accepts Square `inventory.count.updated` and `catalog.version.updated` events, prevents duplicate processing, updates the existing Strawberry database tables, and syncs the resulting quantity to Shopify, Walmart, and Amazon.
 
 ## What Changed
 
@@ -10,6 +10,7 @@ Replacement for the hand-coded Square inventory webhook processor. It accepts Sq
 - Shopify uses Admin GraphQL `2026-07` and `inventorySetQuantities`, replacing deprecated `inventorySetOnHandQuantities`.
 - Multiple Shopify stores are supported. The existing Strawberry store can reuse the legacy `ShopifyID` column; NewWithTags can use Shopify's newer expiring offline token flow and should stay disabled for sync until its domain, app credentials, token, and location ID are ready.
 - Marketplace results are written per channel for easier troubleshooting.
+- Square catalog changes update both `SKU_Temp` and `SKU`, including price, cost, vendor, category, tax, GTIN, description, variation name, alert fields, quantity, and deletion state. Per-field changes are written to `SKU_History` using the existing `FieldName`, `OldValue`, `NewValue`, `Changed` format.
 
 ## Setup
 
@@ -18,6 +19,7 @@ Replacement for the hand-coded Square inventory webhook processor. It accepts Sq
 3. Run `npm install`.
 4. Start locally with `npm start`.
 5. Configure Square to send the exact notification URL in `SQUARE_WEBHOOK_NOTIFICATION_URL`, including scheme, host, and path.
+6. In Square, subscribe the endpoint to both `inventory.count.updated` and `catalog.version.updated`.
 
 The webhook endpoint is:
 
@@ -78,6 +80,7 @@ This project includes a Dockerfile and `.do/app.yaml` for App Platform. Fill the
 
 Minimum runtime secrets:
 
+- `SQUARE_ACCESS_TOKEN`
 - `SQUARE_WEBHOOK_SIGNATURE_KEY`
 - `SQUARE_WEBHOOK_NOTIFICATION_URL`
 - `MYSQL_HOST`
@@ -87,6 +90,8 @@ Minimum runtime secrets:
 - `SHOPIFY_OAUTH_STATE_SECRET`
 
 Add marketplace credentials only for channels you enable.
+
+The first `catalog.version.updated` event runs from the saved `square_catalog_sync_state` cursor. If no cursor exists and `SQUARE_CATALOG_INITIAL_LOOKBACK_HOURS=0`, the service performs a full `SearchCatalogObjects` variation sync with `include_deleted_objects=true`; after that it stores the latest Square update timestamp and only requests changed catalog objects.
 
 For production reliability, run the web service plus the retry worker. The worker reprocesses events that were claimed but failed during marketplace sync.
 
