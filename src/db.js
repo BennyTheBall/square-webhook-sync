@@ -496,7 +496,16 @@ function catalogValuesEqual(left, right) {
 }
 
 function parseVariationParts(variationName) {
-  const parts = String(variationName || "")
+  const normalizedName = String(variationName || "").trim();
+  if (!normalizedName.includes(",")) {
+    return {
+      size: "",
+      color: "",
+      style: clampCatalogDetail(normalizedName, 50),
+    };
+  }
+
+  const parts = normalizedName
     .split(",")
     .map((part) => part.trim());
 

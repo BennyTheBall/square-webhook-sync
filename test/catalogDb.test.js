@@ -96,3 +96,41 @@ test('upsertCatalogVariation truncates parsed SKU_Temp detail fields to column l
   assert.equal(tempInsert.params.Color, 'C'.repeat(50));
   assert.equal(tempInsert.params.Style, 'T'.repeat(50));
 });
+
+test('upsertCatalogVariation treats comma-less variation names as style', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR789',
+    itemName: 'Style Only Item',
+    description: '',
+    category: 'Body',
+    sku: '123456789014',
+    gtin: '',
+    variationName: 'Mimic',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
+  assert.equal(tempInsert.params.Size, '');
+  assert.equal(tempInsert.params.Color, '');
+  assert.equal(tempInsert.params.Style, 'Mimic');
+});
