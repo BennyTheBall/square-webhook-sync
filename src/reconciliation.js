@@ -33,6 +33,7 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
   const stats = {
     runDate,
     squareRecords: 0,
+    stagedRecords: 0,
     changed: 0,
     insertedOrUpdated: 0,
     alreadyCurrent: 0,
@@ -43,7 +44,6 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     errors: [],
     samples: [],
   };
-  const seenSquareTokens = new Set();
 
   await db.markReconciliationRun?.({
     runDate,
@@ -53,6 +53,8 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
   });
 
   try {
+    await db.resetCatalogReconciliationStage?.(runDate);
+
     for await (const page of searchChangedCatalogObjectPages({ config, beginTime: null })) {
       stats.pages += 1;
       const variations = normalizeCatalogVariations(page);
@@ -71,43 +73,48 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
 
       for (const variation of variations) {
         stats.squareRecords += 1;
-        seenSquareTokens.add(variation.token);
-        try {
-          if (!variation.deleted) {
-            await hydrateMissingCatalogFields({ config, variation });
-            variation.quantity = quantities.get(variation.token) || 0;
-          }
-          const result = await db.upsertCatalogVariation(variation);
-          if (result.changed) stats.changed += 1;
-          if (variation.deleted && result.changed) stats.squareDeleted += 1;
-          if (result.message?.includes("Already current")) stats.alreadyCurrent += 1;
-          if (result.message?.includes("Inserted/updated") || result.message?.includes("Updated")) {
-            stats.insertedOrUpdated += 1;
-          }
-          addSample(stats, {
-            sku: variation.sku,
-            token: variation.token,
-            itemName: variation.itemName,
-            variantName: variation.variationName,
-            status: result.status,
-            message: result.message,
-          });
-        } catch (error) {
-          stats.failed += 1;
-          addError(stats, `${variation.sku || variation.token}: ${error.message}`);
-          logger.error("Square catalog reconciliation item failed", {
-            runDate,
-            token: variation.token,
-            sku: variation.sku,
-            error,
-          });
+        if (!variation.deleted) {
+          await hydrateMissingCatalogFields({ config, variation });
+          variation.quantity = quantities.get(variation.token) || 0;
         }
+      }
+
+      const stageResult = await db.stageCatalogVariations?.(runDate, variations);
+      stats.stagedRecords += stageResult?.inserted ?? variations.length;
+    }
+
+    const stagedVariations = await db.listCatalogReconciliationStage?.(runDate) || [];
+    for (const variation of stagedVariations) {
+      try {
+        const result = await db.upsertCatalogVariation(variation);
+        if (result.changed) stats.changed += 1;
+        if (variation.deleted && result.changed) stats.squareDeleted += 1;
+        if (result.message?.includes("Already current")) stats.alreadyCurrent += 1;
+        if (result.message?.includes("Inserted/updated") || result.message?.includes("Updated")) {
+          stats.insertedOrUpdated += 1;
+        }
+        addSample(stats, {
+          sku: variation.sku,
+          token: variation.token,
+          itemName: variation.itemName,
+          variantName: variation.variationName,
+          status: result.status,
+          message: result.message,
+        });
+      } catch (error) {
+        stats.failed += 1;
+        addError(stats, `${variation.sku || variation.token}: ${error.message}`);
+        logger.error("Square catalog reconciliation item failed", {
+          runDate,
+          token: variation.token,
+          sku: variation.sku,
+          error,
+        });
       }
     }
 
-    const activeLocalRecords = await db.listActiveCatalogRecords?.() || [];
+    const activeLocalRecords = await getMissingLocalRecords({ db, runDate, stagedVariations });
     for (const record of activeLocalRecords) {
-      if (seenSquareTokens.has(record.Token)) continue;
       try {
         const result = await db.markMissingSquareCatalogDeleted(record, new Date());
         if (result.changed) {
@@ -169,6 +176,7 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
       runDate,
       status,
       squareRecords: stats.squareRecords,
+      stagedRecords: stats.stagedRecords,
       changed: stats.changed,
       failed: stats.failed,
       email: emailResult.sent ? "sent" : emailResult.reason,
@@ -189,6 +197,16 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     await sendReconciliationEmail({ config, runDate, timezone, stats, transporter, error });
     return { ran: true, status: "failed", stats, error };
   }
+}
+
+async function getMissingLocalRecords({ db, runDate, stagedVariations }) {
+  if (db.listActiveCatalogRecordsMissingFromStage) {
+    return db.listActiveCatalogRecordsMissingFromStage(runDate);
+  }
+
+  const seenSquareTokens = new Set((stagedVariations || []).map((variation) => variation.token));
+  const activeLocalRecords = await db.listActiveCatalogRecords?.() || [];
+  return activeLocalRecords.filter((record) => !seenSquareTokens.has(record.Token));
 }
 
 async function hydrateMissingCatalogFields({ config, variation }) {
@@ -242,6 +260,7 @@ export function buildReconciliationText({ runDate, timezone, stats, error = null
     `Status: ${error || stats.failed > 0 ? "FAILED" : "Complete"}`,
     "",
     `Square records scanned: ${stats.squareRecords}`,
+    `Square records staged: ${stats.stagedRecords ?? stats.squareRecords}`,
     `Pages scanned: ${stats.pages}`,
     `Database changes: ${stats.changed}`,
     `Inserted/updated: ${stats.insertedOrUpdated}`,
@@ -271,6 +290,7 @@ export function buildReconciliationHtml({ runDate, timezone, stats, error = null
     <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 13px;">
       <tbody>
         ${summaryRow("Square records scanned", stats.squareRecords)}
+        ${summaryRow("Square records staged", stats.stagedRecords ?? stats.squareRecords)}
         ${summaryRow("Pages scanned", stats.pages)}
         ${summaryRow("Database changes", stats.changed)}
         ${summaryRow("Inserted/updated", stats.insertedOrUpdated)}

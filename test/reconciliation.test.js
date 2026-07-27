@@ -10,7 +10,13 @@ test("maybeRunCatalogReconciliation runs once after 7am Eastern", async () => {
       return null;
     },
     markReconciliationRun: async (run) => calls.push(["mark", run.status]),
-    listActiveCatalogRecords: async () => [],
+    resetCatalogReconciliationStage: async (runDate) => calls.push(["resetStage", runDate]),
+    stageCatalogVariations: async (runDate, variations) => {
+      calls.push(["stage", runDate, variations.length]);
+      return { inserted: variations.length };
+    },
+    listCatalogReconciliationStage: async () => [],
+    listActiveCatalogRecordsMissingFromStage: async () => [],
     upsertCatalogVariation: async () => ({ status: "success", changed: false, message: "Already current" }),
   };
   const previousFetch = globalThis.fetch;
@@ -90,11 +96,18 @@ test("runCatalogReconciliation processes Square pages and missing local deletes"
   };
 
   const upserts = [];
+  const staged = [];
   const deleted = [];
   const db = {
     markReconciliationRun: async (run) => calls.push({ runStatus: run.status }),
-    listActiveCatalogRecords: async () => [
-      { ID: 1, Token: "VAR123", SKU: "123456789012" },
+    resetCatalogReconciliationStage: async (runDate) => calls.push({ resetStage: runDate }),
+    stageCatalogVariations: async (runDate, variations) => {
+      staged.push(...variations);
+      calls.push({ stage: runDate, count: variations.length });
+      return { inserted: variations.length };
+    },
+    listCatalogReconciliationStage: async () => staged,
+    listActiveCatalogRecordsMissingFromStage: async () => [
       { ID: 2, Token: "MISSING123", SKU: "999999999999", ItemName: "Missing", VarName: "Gone" },
     ],
     upsertCatalogVariation: async (variation) => {
@@ -117,6 +130,7 @@ test("runCatalogReconciliation processes Square pages and missing local deletes"
 
     assert.equal(result.ran, true);
     assert.equal(result.status, "completed");
+    assert.equal(staged.length, 1);
     assert.equal(upserts[0].sku, "123456789012");
     assert.equal(upserts[0].quantity, 9);
     assert.deepEqual(deleted.map((record) => record.Token), ["MISSING123"]);

@@ -70,3 +70,29 @@ CREATE TABLE IF NOT EXISTS square_catalog_reconciliation_runs (
   last_error TEXT NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS square_catalog_reconciliation_stage (
+  run_date DATE NOT NULL,
+  token VARCHAR(128) NOT NULL,
+  deleted TINYINT(1) NOT NULL DEFAULT 0,
+  square_updated_at VARCHAR(64) NULL,
+  item_name VARCHAR(255) NULL,
+  description TEXT NULL,
+  category VARCHAR(128) NULL,
+  category_id VARCHAR(128) NULL,
+  sku VARCHAR(128) NULL,
+  gtin VARCHAR(128) NULL,
+  variation_name VARCHAR(255) NULL,
+  price DECIMAL(10,2) NULL,
+  cost DECIMAL(10,2) NULL,
+  vendor VARCHAR(128) NULL,
+  quantity INT NOT NULL DEFAULT 0,
+  alert_enabled VARCHAR(8) NULL,
+  alert_count INT NULL,
+  tax VARCHAR(8) NULL,
+  raw_json JSON NULL,
+  staged_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_date, token),
+  INDEX idx_square_catalog_stage_sku (run_date, sku),
+  INDEX idx_square_catalog_stage_deleted (run_date, deleted)
+);

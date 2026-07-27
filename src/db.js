@@ -37,6 +37,10 @@ export function createDb(config) {
     upsertCatalogVariation: (variation) => upsertCatalogVariation(pool, tables, variation, new Date()),
     getReconciliationRun: (runDate) => getReconciliationRun(pool, runDate),
     markReconciliationRun: (run) => markReconciliationRun(pool, run),
+    resetCatalogReconciliationStage: (runDate) => resetCatalogReconciliationStage(pool, runDate),
+    stageCatalogVariations: (runDate, variations) => stageCatalogVariations(pool, runDate, variations),
+    listCatalogReconciliationStage: (runDate) => listCatalogReconciliationStage(pool, runDate),
+    listActiveCatalogRecordsMissingFromStage: (runDate) => listActiveCatalogRecordsMissingFromStage(pool, tables, runDate),
     listActiveCatalogRecords: () => listActiveCatalogRecords(pool, tables),
     markMissingSquareCatalogDeleted: (record, changedAt) => markMissingSquareCatalogDeleted(pool, tables, record, changedAt),
     updateShopifyId: ({ skuRecord, shopifyId }) => updateShopifyId(pool, tables, skuRecord, shopifyId, new Date()),
@@ -283,6 +287,130 @@ export async function markReconciliationRun(db, run) {
       lastError: run.lastError ? String(run.lastError).slice(0, 5000) : null
     }
   );
+}
+
+export async function resetCatalogReconciliationStage(db, runDate) {
+  await db.execute(
+    `DELETE FROM square_catalog_reconciliation_stage
+      WHERE run_date = :runDate`,
+    { runDate }
+  );
+}
+
+export async function stageCatalogVariations(db, runDate, variations) {
+  const rows = variations || [];
+  if (!rows.length) return { inserted: 0 };
+
+  let inserted = 0;
+  for (const batch of chunks(rows, 100)) {
+    const params = {};
+    const valuesSql = batch.map((variation, index) => {
+      const prefix = `r${index}`;
+      params[`${prefix}RunDate`] = runDate;
+      params[`${prefix}Token`] = clampText(variation.token, 128);
+      params[`${prefix}Deleted`] = variation.deleted ? 1 : 0;
+      params[`${prefix}SquareUpdatedAt`] = clampText(variation.updatedAt, 64) || null;
+      params[`${prefix}ItemName`] = clampText(variation.itemName, 255);
+      params[`${prefix}Description`] = variation.description || "";
+      params[`${prefix}Category`] = clampText(variation.category, 128);
+      params[`${prefix}CategoryId`] = clampText(variation.categoryId, 128);
+      params[`${prefix}Sku`] = clampText(variation.sku, 128);
+      params[`${prefix}Gtin`] = clampText(variation.gtin, 128);
+      params[`${prefix}VariationName`] = clampText(variation.variationName, 255);
+      params[`${prefix}Price`] = variation.price ?? null;
+      params[`${prefix}Cost`] = variation.cost ?? null;
+      params[`${prefix}Vendor`] = clampText(variation.vendor, 128);
+      params[`${prefix}Quantity`] = variation.quantity ?? 0;
+      params[`${prefix}AlertEnabled`] = clampText(variation.alertEnabled || "N", 8);
+      params[`${prefix}AlertCount`] = variation.alertCount ?? null;
+      params[`${prefix}Tax`] = clampText(variation.tax, 8);
+      params[`${prefix}RawJson`] = JSON.stringify(variation.raw || {});
+      return `(
+        :${prefix}RunDate, :${prefix}Token, :${prefix}Deleted, :${prefix}SquareUpdatedAt,
+        :${prefix}ItemName, :${prefix}Description, :${prefix}Category, :${prefix}CategoryId,
+        :${prefix}Sku, :${prefix}Gtin, :${prefix}VariationName, :${prefix}Price,
+        :${prefix}Cost, :${prefix}Vendor, :${prefix}Quantity, :${prefix}AlertEnabled,
+        :${prefix}AlertCount, :${prefix}Tax, CAST(:${prefix}RawJson AS JSON)
+      )`;
+    }).join(", ");
+
+    await db.execute(
+      `INSERT INTO square_catalog_reconciliation_stage
+         (run_date, token, deleted, square_updated_at, item_name, description, category, category_id,
+          sku, gtin, variation_name, price, cost, vendor, quantity, alert_enabled, alert_count, tax, raw_json)
+       VALUES ${valuesSql}
+       ON DUPLICATE KEY UPDATE
+         deleted = VALUES(deleted),
+         square_updated_at = VALUES(square_updated_at),
+         item_name = VALUES(item_name),
+         description = VALUES(description),
+         category = VALUES(category),
+         category_id = VALUES(category_id),
+         sku = VALUES(sku),
+         gtin = VALUES(gtin),
+         variation_name = VALUES(variation_name),
+         price = VALUES(price),
+         cost = VALUES(cost),
+         vendor = VALUES(vendor),
+         quantity = VALUES(quantity),
+         alert_enabled = VALUES(alert_enabled),
+         alert_count = VALUES(alert_count),
+         tax = VALUES(tax),
+         raw_json = VALUES(raw_json)`,
+      params
+    );
+    inserted += batch.length;
+  }
+
+  return { inserted };
+}
+
+export async function listCatalogReconciliationStage(db, runDate) {
+  const [rows] = await db.execute(
+    `SELECT token, deleted, square_updated_at, item_name, description, category, category_id,
+            sku, gtin, variation_name, price, cost, vendor, quantity, alert_enabled,
+            alert_count, tax, raw_json
+       FROM square_catalog_reconciliation_stage
+      WHERE run_date = :runDate
+      ORDER BY token`,
+    { runDate }
+  );
+  return rows.map((row) => ({
+    token: row.token,
+    deleted: Boolean(row.deleted),
+    updatedAt: row.square_updated_at,
+    itemName: emptyStringToNull(row.item_name),
+    description: emptyStringToNull(row.description),
+    category: emptyStringToNull(row.category),
+    categoryId: emptyStringToNull(row.category_id),
+    sku: emptyStringToNull(row.sku),
+    gtin: emptyStringToNull(row.gtin),
+    variationName: emptyStringToNull(row.variation_name),
+    price: row.price == null ? null : String(row.price),
+    cost: row.cost == null ? null : String(row.cost),
+    vendor: emptyStringToNull(row.vendor),
+    quantity: row.quantity == null ? 0 : Number(row.quantity),
+    alertEnabled: row.alert_enabled || "N",
+    alertCount: row.alert_count,
+    tax: emptyStringToNull(row.tax),
+    raw: parseJson(row.raw_json) || {},
+  }));
+}
+
+export async function listActiveCatalogRecordsMissingFromStage(db, tables, runDate) {
+  const [rows] = await db.execute(
+    `SELECT l.ID, l.Token, l.SKU, l.ItemName, l.VarName, l.Deleted
+       FROM ${escapeId(tables.skuTemp || tables.sku)} l
+       LEFT JOIN square_catalog_reconciliation_stage staged
+         ON staged.run_date = :runDate
+        AND staged.token = l.Token
+      WHERE l.Deleted IS NULL
+        AND l.Token IS NOT NULL
+        AND l.Token <> ''
+        AND staged.token IS NULL`,
+    { runDate }
+  );
+  return rows;
 }
 
 export async function listActiveCatalogRecords(db, tables) {
@@ -554,6 +682,34 @@ function parseVariationParts(variationName) {
 
 function clampCatalogDetail(value, maxLength) {
   return String(value || "").slice(0, maxLength);
+}
+
+function clampText(value, maxLength) {
+  return String(value || "").slice(0, maxLength);
+}
+
+function chunks(items, size) {
+  const output = [];
+  for (let index = 0; index < items.length; index += size) {
+    output.push(items.slice(index, index + size));
+  }
+  return output;
+}
+
+function emptyStringToNull(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+function parseJson(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 export async function updateShopifyId(db, tables, skuRecord, inventoryItemId, changedAt) {
