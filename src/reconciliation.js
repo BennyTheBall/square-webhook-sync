@@ -34,6 +34,7 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     runDate,
     squareRecords: 0,
     stagedRecords: 0,
+    appliedRecords: 0,
     changed: 0,
     insertedOrUpdated: 0,
     alreadyCurrent: 0,
@@ -84,9 +85,21 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     }
 
     const stagedVariations = await db.listCatalogReconciliationStage?.(runDate) || [];
-    for (const variation of stagedVariations) {
+    logger.info("Square catalog reconciliation apply started", {
+      runDate,
+      stagedRecords: stagedVariations.length,
+    });
+    await db.markReconciliationRun?.({
+      runDate,
+      status: "running",
+      startedAt,
+      summary: stats,
+    });
+
+    for (const [index, variation] of stagedVariations.entries()) {
       try {
         const result = await db.upsertCatalogVariation(variation);
+        stats.appliedRecords = index + 1;
         if (result.changed) stats.changed += 1;
         if (variation.deleted && result.changed) stats.squareDeleted += 1;
         if (result.message?.includes("Already current")) stats.alreadyCurrent += 1;
@@ -109,6 +122,22 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
           token: variation.token,
           sku: variation.sku,
           error,
+        });
+      }
+
+      if ((index + 1) % 500 === 0 || index + 1 === stagedVariations.length) {
+        logger.info("Square catalog reconciliation apply progress", {
+          runDate,
+          appliedRecords: index + 1,
+          stagedRecords: stagedVariations.length,
+          changed: stats.changed,
+          failed: stats.failed,
+        });
+        await db.markReconciliationRun?.({
+          runDate,
+          status: "running",
+          startedAt,
+          summary: stats,
         });
       }
     }
@@ -261,6 +290,7 @@ export function buildReconciliationText({ runDate, timezone, stats, error = null
     "",
     `Square records scanned: ${stats.squareRecords}`,
     `Square records staged: ${stats.stagedRecords ?? stats.squareRecords}`,
+    `Staged records applied: ${stats.appliedRecords ?? 0}`,
     `Pages scanned: ${stats.pages}`,
     `Database changes: ${stats.changed}`,
     `Inserted/updated: ${stats.insertedOrUpdated}`,
@@ -291,6 +321,7 @@ export function buildReconciliationHtml({ runDate, timezone, stats, error = null
       <tbody>
         ${summaryRow("Square records scanned", stats.squareRecords)}
         ${summaryRow("Square records staged", stats.stagedRecords ?? stats.squareRecords)}
+        ${summaryRow("Staged records applied", stats.appliedRecords ?? 0)}
         ${summaryRow("Pages scanned", stats.pages)}
         ${summaryRow("Database changes", stats.changed)}
         ${summaryRow("Inserted/updated", stats.insertedOrUpdated)}
