@@ -40,6 +40,7 @@ export function createDb(config) {
     resetCatalogReconciliationStage: (runDate) => resetCatalogReconciliationStage(pool, runDate),
     stageCatalogVariations: (runDate, variations) => stageCatalogVariations(pool, runDate, variations),
     listCatalogReconciliationStage: (runDate) => listCatalogReconciliationStage(pool, runDate),
+    listChangedCatalogReconciliationStage: (runDate) => listChangedCatalogReconciliationStage(pool, tables, runDate),
     listActiveCatalogRecordsMissingFromStage: (runDate) => listActiveCatalogRecordsMissingFromStage(pool, tables, runDate),
     listActiveCatalogRecords: () => listActiveCatalogRecords(pool, tables),
     markMissingSquareCatalogDeleted: (record, changedAt) => markMissingSquareCatalogDeleted(pool, tables, record, changedAt),
@@ -375,6 +376,77 @@ export async function listCatalogReconciliationStage(db, runDate) {
       ORDER BY token`,
     { runDate }
   );
+  return mapCatalogReconciliationStageRows(rows);
+}
+
+export async function listChangedCatalogReconciliationStage(db, tables, runDate) {
+  const tempTable = escapeId(tables.skuTemp || tables.sku);
+  const mainTable = escapeId(tables.skuMain || "SKU");
+  const tempChanged = `
+    t.ID IS NULL
+    OR NOT (t.Token <=> s.token)
+    OR COALESCE(t.ItemName, '') <> COALESCE(s.item_name, '')
+    OR COALESCE(t.Description, '') <> COALESCE(s.description, '')
+    OR COALESCE(t.Cat, '') <> COALESCE(s.category, '')
+    OR COALESCE(t.SKU, '') <> COALESCE(s.sku, '')
+    OR COALESCE(t.GTIN, '') <> COALESCE(s.gtin, '')
+    OR COALESCE(t.VarName, '') <> COALESCE(s.variation_name, '')
+    OR NOT (t.Price <=> s.price)
+    OR NOT (t.Cost <=> s.cost)
+    OR COALESCE(t.Vendor, '') <> COALESCE(s.vendor, '')
+    OR COALESCE(t.Quantity, 0) <> COALESCE(s.quantity, 0)
+    OR COALESCE(t.AlertEnable, 'N') <> COALESCE(s.alert_enabled, 'N')
+    OR NOT (t.AlertCount <=> s.alert_count)
+    OR (NULLIF(s.tax, '') IS NOT NULL AND COALESCE(t.Tax, '') <> s.tax)
+    OR COALESCE(t.Remove, 'N') <> 'N'`;
+  const mainChanged = `
+    m.ID IS NULL
+    OR NOT (m.Token <=> s.token)
+    OR COALESCE(m.ItemName, '') <> COALESCE(s.item_name, '')
+    OR COALESCE(m.Description, '') <> COALESCE(s.description, '')
+    OR COALESCE(m.Cat, '') <> COALESCE(s.category, '')
+    OR COALESCE(m.SKU, '') <> COALESCE(s.sku, '')
+    OR COALESCE(m.GTIN, '') <> COALESCE(s.gtin, '')
+    OR COALESCE(m.VarName, '') <> COALESCE(s.variation_name, '')
+    OR NOT (m.Price <=> s.price)
+    OR NOT (m.Cost <=> s.cost)
+    OR COALESCE(m.Vendor, '') <> COALESCE(s.vendor, '')
+    OR COALESCE(m.Quantity, 0) <> COALESCE(s.quantity, 0)
+    OR COALESCE(m.AlertEnable, 'N') <> COALESCE(s.alert_enabled, 'N')
+    OR NOT (m.AlertCount <=> s.alert_count)
+    OR (NULLIF(s.tax, '') IS NOT NULL AND COALESCE(m.Tax, '') <> s.tax)
+    OR COALESCE(m.Remove, 'N') <> 'N'`;
+  const [rows] = await db.execute(
+    `SELECT DISTINCT s.token, s.deleted, s.square_updated_at, s.item_name, s.description, s.category, s.category_id,
+            s.sku, s.gtin, s.variation_name, s.price, s.cost, s.vendor, s.quantity, s.alert_enabled,
+            s.alert_count, s.tax, s.raw_json
+       FROM square_catalog_reconciliation_stage s
+       LEFT JOIN ${tempTable} t ON t.Token = s.token AND t.Deleted IS NULL
+       LEFT JOIN ${mainTable} m ON m.Token = s.token AND COALESCE(UPPER(m.Deleted), 'N') <> 'Y'
+      WHERE s.run_date = :runDate
+        AND (
+          (
+            s.deleted = 1
+            AND (
+              (t.ID IS NOT NULL AND t.Deleted IS NULL)
+              OR (m.ID IS NOT NULL AND COALESCE(UPPER(m.Deleted), 'N') <> 'Y')
+            )
+          )
+          OR (
+            s.deleted = 0
+            AND (
+              ${tempChanged}
+              OR ${mainChanged}
+            )
+          )
+        )
+      ORDER BY s.token`,
+    { runDate }
+  );
+  return mapCatalogReconciliationStageRows(rows);
+}
+
+function mapCatalogReconciliationStageRows(rows) {
   return rows.map((row) => ({
     token: row.token,
     deleted: Boolean(row.deleted),

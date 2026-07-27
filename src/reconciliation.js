@@ -94,10 +94,15 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
       stats.stagedRecords += stageResult?.inserted ?? variations.length;
     }
 
-    const stagedVariations = await db.listCatalogReconciliationStage?.(runDate) || [];
+    const stagedVariations = await (
+      db.listChangedCatalogReconciliationStage
+        ? db.listChangedCatalogReconciliationStage(runDate)
+        : db.listCatalogReconciliationStage?.(runDate)
+    ) || [];
     logger.info("Square catalog reconciliation apply started", {
       runDate,
-      stagedRecords: stagedVariations.length,
+      stagedRecords: stats.stagedRecords,
+      recordsNeedingApply: stagedVariations.length,
     });
     await db.markReconciliationRun?.({
       runDate,
