@@ -382,6 +382,10 @@ export async function listCatalogReconciliationStage(db, runDate) {
 export async function listChangedCatalogReconciliationStage(db, tables, runDate) {
   const tempTable = escapeId(tables.skuTemp || tables.sku);
   const mainTable = escapeId(tables.skuMain || "SKU");
+  const commaCount = "(CHAR_LENGTH(COALESCE(s.variation_name, '')) - CHAR_LENGTH(REPLACE(COALESCE(s.variation_name, ''), ',', '')))";
+  const parsedSize = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', 1)), 20) ELSE '' END`;
+  const parsedColor = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.variation_name, ',', 2), ',', -1)), 50) ELSE '' END`;
+  const parsedStyle = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', -1)), 50) ELSE '' END`;
   const tempChanged = `
     t.ID IS NULL
     OR NOT (t.Token <=> s.token)
@@ -398,6 +402,9 @@ export async function listChangedCatalogReconciliationStage(db, tables, runDate)
     OR COALESCE(t.AlertEnable, 'N') <> COALESCE(s.alert_enabled, 'N')
     OR NOT (t.AlertCount <=> s.alert_count)
     OR (NULLIF(s.tax, '') IS NOT NULL AND COALESCE(t.Tax, '') <> s.tax)
+    OR COALESCE(t.Size, '') <> ${parsedSize}
+    OR COALESCE(t.Color, '') <> ${parsedColor}
+    OR COALESCE(t.Style, '') <> ${parsedStyle}
     OR COALESCE(t.Remove, 'N') <> 'N'`;
   const mainChanged = `
     m.ID IS NULL
@@ -603,7 +610,7 @@ export async function markMissingSquareCatalogDeleted(db, tables, record, change
 
 async function upsertCatalogTable(db, tables, table, kind, existing, variation, changedAt) {
   const deletedValue = kind === "temp" ? null : "N";
-  const variantParts = parseVariationParts(variation.variationName);
+  const variantParts = parseVariationParts(variation.variationName, variation.category);
   const values = {
     Token: variation.token,
     ItemName: variation.itemName,
@@ -638,8 +645,7 @@ async function upsertCatalogTable(db, tables, table, kind, existing, variation, 
       values
     );
     if (kind === "temp") {
-      await insertHistory(db, tables, values.SKU, "INSERT", "", "Inserted from Square catalog", changedAt);
-      await insertCatalogFieldHistory(db, tables, values.SKU, Object.entries(values), {}, changedAt);
+      await insertHistory(db, tables, values.SKU, "CREATED", "", values.Token, changedAt);
     }
     return { inserted: true, changed: true };
   }
@@ -731,24 +737,19 @@ function catalogValuesEqual(left, right) {
   return String(left).trim() === String(right).trim();
 }
 
-function parseVariationParts(variationName) {
-  const normalizedName = String(variationName || "").trim();
-  if (!normalizedName.includes(",")) {
-    return {
-      size: "",
-      color: "",
-      style: clampCatalogDetail(normalizedName, 50),
-    };
-  }
+function parseVariationParts(variationName, category) {
+  const emptyParts = { size: "", color: "", style: "" };
+  if (category !== "Clothing") return emptyParts;
 
-  const parts = normalizedName
-    .split(",")
-    .map((part) => part.trim());
+  const normalizedName = String(variationName || "");
+  const commaCount = (normalizedName.match(/,/g) || []).length;
+  if (commaCount !== 2 && commaCount !== 3) return emptyParts;
 
+  const parts = normalizedName.split(",");
   return {
-    size: clampCatalogDetail(parts[0], 20),
-    color: clampCatalogDetail(parts[1], 50),
-    style: clampCatalogDetail(parts.slice(2).join(","), 50),
+    size: clampCatalogDetail(parts[0].trim(), 20),
+    color: clampCatalogDetail(parts[1].trim(), 50),
+    style: clampCatalogDetail(parts[commaCount].trim(), 50),
   };
 }
 

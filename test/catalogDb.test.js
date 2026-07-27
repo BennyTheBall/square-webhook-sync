@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { upsertCatalogVariation } from '../src/db.js';
 
-test('upsertCatalogVariation records field history when inserting a catalog item', async () => {
+test('upsertCatalogVariation records legacy CREATED history when inserting a catalog item', async () => {
   const statements = [];
   const db = {
     execute: async (sql, params = {}) => {
@@ -21,7 +21,7 @@ test('upsertCatalogVariation records field history when inserting a catalog item
     token: 'VAR123',
     itemName: 'Catalog Item',
     description: '',
-    category: 'Body',
+    category: 'Clothing',
     sku: '123456789012',
     gtin: '',
     variationName: 'NS,NC,Mimic',
@@ -41,14 +41,10 @@ test('upsertCatalogVariation records field history when inserting a catalog item
     .filter((statement) => statement.sql.includes('INSERT INTO `SKU_History`'))
     .map((statement) => statement.params);
 
-  assert.equal(historyRows.some((row) => row.fieldName === 'INSERT'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Cost' && row.newValue === '5.10'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Price' && row.newValue === '10.99'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Quantity' && row.newValue === '7'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Size' && row.newValue === 'NS'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Color' && row.newValue === 'NC'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Style' && row.newValue === 'Mimic'), true);
-  assert.equal(historyRows.some((row) => row.fieldName === 'Deleted'), false);
+  assert.equal(historyRows.length, 1);
+  assert.equal(historyRows[0].fieldName, 'CREATED');
+  assert.equal(historyRows[0].oldValue, '');
+  assert.equal(historyRows[0].newValue, 'VAR123');
 
   const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
   assert.equal(tempInsert.params.Size, 'NS');
@@ -78,7 +74,7 @@ test('upsertCatalogVariation truncates parsed SKU_Temp detail fields to column l
     token: 'VAR456',
     itemName: 'Long Detail Item',
     description: '',
-    category: 'Body',
+    category: 'Clothing',
     sku: '123456789013',
     gtin: '',
     variationName: `${'S'.repeat(30)},${'C'.repeat(60)},${'T'.repeat(70)}`,
@@ -97,7 +93,7 @@ test('upsertCatalogVariation truncates parsed SKU_Temp detail fields to column l
   assert.equal(tempInsert.params.Style, 'T'.repeat(50));
 });
 
-test('upsertCatalogVariation treats comma-less variation names as style', async () => {
+test('upsertCatalogVariation leaves comma-less variation details empty like loadcatelog-temp', async () => {
   const statements = [];
   const db = {
     execute: async (sql, params = {}) => {
@@ -116,7 +112,7 @@ test('upsertCatalogVariation treats comma-less variation names as style', async 
     token: 'VAR789',
     itemName: 'Style Only Item',
     description: '',
-    category: 'Body',
+    category: 'Clothing',
     sku: '123456789014',
     gtin: '',
     variationName: 'Mimic',
@@ -132,7 +128,83 @@ test('upsertCatalogVariation treats comma-less variation names as style', async 
   const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
   assert.equal(tempInsert.params.Size, '');
   assert.equal(tempInsert.params.Color, '');
-  assert.equal(tempInsert.params.Style, 'Mimic');
+  assert.equal(tempInsert.params.Style, '');
+});
+
+test('upsertCatalogVariation ignores description segment in four-part clothing variation names', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR-FOUR-PART',
+    itemName: 'Four Part Item',
+    description: '',
+    category: 'Clothing',
+    sku: '123456789017',
+    gtin: '',
+    variationName: 'M,Black,Ignored Description,Sleeveless Shirt',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
+  assert.equal(tempInsert.params.Size, 'M');
+  assert.equal(tempInsert.params.Color, 'Black');
+  assert.equal(tempInsert.params.Style, 'Sleeveless Shirt');
+});
+
+test('upsertCatalogVariation parses variation details only for Clothing category', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR-NON-CLOTHING',
+    itemName: 'Non Clothing Item',
+    description: '',
+    category: 'Body',
+    sku: '123456789018',
+    gtin: '',
+    variationName: 'NS,NC,Mimic',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
+  assert.equal(tempInsert.params.Size, '');
+  assert.equal(tempInsert.params.Color, '');
+  assert.equal(tempInsert.params.Style, '');
 });
 
 test('upsertCatalogVariation prefers matching existing SKU rows before token rows', async () => {
