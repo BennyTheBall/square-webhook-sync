@@ -1,9 +1,9 @@
 import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
 import {
+  batchRetrieveCatalogObjects,
   getSquareQuantitiesByCatalogObject,
   normalizeCatalogVariations,
-  retrieveCatalogObject,
   searchChangedCatalogObjectPages,
 } from "./square.js";
 
@@ -42,9 +42,15 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     missingDeleted: 0,
     failed: 0,
     pages: 0,
+    squareApiCalls: {
+      catalogSearch: 0,
+      inventoryBatchRetrieve: 0,
+      catalogBatchRetrieve: 0,
+    },
     errors: [],
     samples: [],
   };
+  const categoryCache = new Map();
 
   await db.markReconciliationRun?.({
     runDate,
@@ -58,24 +64,28 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
 
     for await (const page of searchChangedCatalogObjectPages({ config, beginTime: null })) {
       stats.pages += 1;
+      stats.squareApiCalls.catalogSearch += 1;
       const variations = normalizeCatalogVariations(page);
       const activeVariationIds = variations.filter((variation) => !variation.deleted).map((variation) => variation.token);
+      stats.squareApiCalls.inventoryBatchRetrieve += Math.ceil(activeVariationIds.length / 1000);
       const quantities = await getSquareQuantitiesByCatalogObject({
         config,
         catalogObjectIds: activeVariationIds,
       });
+      const hydrateResult = await hydrateMissingCatalogFields({ config, variations, categoryCache });
+      stats.squareApiCalls.catalogBatchRetrieve += hydrateResult.apiCalls;
 
       logger.info("Square catalog reconciliation page received", {
         runDate,
         page: stats.pages,
         objectCount: page.objects.length,
         variationCount: variations.length,
+        squareApiCalls: stats.squareApiCalls,
       });
 
       for (const variation of variations) {
         stats.squareRecords += 1;
         if (!variation.deleted) {
-          await hydrateMissingCatalogFields({ config, variation });
           variation.quantity = quantities.get(variation.token) || 0;
         }
       }
@@ -238,11 +248,33 @@ async function getMissingLocalRecords({ db, runDate, stagedVariations }) {
   return activeLocalRecords.filter((record) => !seenSquareTokens.has(record.Token));
 }
 
-async function hydrateMissingCatalogFields({ config, variation }) {
-  if (!variation.category && variation.categoryId) {
-    const category = await retrieveCatalogObject({ config, objectId: variation.categoryId });
-    variation.category = category?.category_data?.name || variation.categoryId;
+async function hydrateMissingCatalogFields({ config, variations, categoryCache }) {
+  const missingCategoryIds = [];
+  for (const variation of variations) {
+    if (variation.deleted || variation.category || !variation.categoryId) continue;
+    if (categoryCache.has(variation.categoryId)) {
+      variation.category = categoryCache.get(variation.categoryId) || variation.categoryId;
+    } else {
+      missingCategoryIds.push(variation.categoryId);
+    }
   }
+
+  const categoryIds = [...new Set(missingCategoryIds)];
+  if (!categoryIds.length) return { apiCalls: 0 };
+
+  const categories = await batchRetrieveCatalogObjects({ config, objectIds: categoryIds });
+  for (const categoryId of categoryIds) {
+    const category = categories.get(categoryId);
+    categoryCache.set(categoryId, category?.category_data?.name || null);
+  }
+
+  for (const variation of variations) {
+    if (!variation.category && variation.categoryId && categoryCache.has(variation.categoryId)) {
+      variation.category = categoryCache.get(variation.categoryId) || variation.categoryId;
+    }
+  }
+
+  return { apiCalls: Math.ceil(categoryIds.length / 1000) };
 }
 
 async function sendReconciliationEmail({ config, runDate, timezone, stats, transporter = null, error = null }) {

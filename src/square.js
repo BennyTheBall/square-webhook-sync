@@ -153,6 +153,42 @@ export async function retrieveCatalogObject({ config, objectId }) {
   return body.object || null;
 }
 
+export async function batchRetrieveCatalogObjects({ config, objectIds }) {
+  const ids = [...new Set((objectIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  if (!config.square.accessToken) {
+    throw new Error('SQUARE_ACCESS_TOKEN is required to retrieve Square catalog objects');
+  }
+
+  const objects = new Map();
+  for (const batchIds of chunks(ids, 1000)) {
+    const response = await squareFetch(`${config.square.apiBaseUrl}/v2/catalog/batch-retrieve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.square.accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Square-Version': config.square.apiVersion || '2026-07-15',
+      },
+      body: JSON.stringify({
+        object_ids: batchIds,
+        include_related_objects: false,
+      }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`Square catalog batch retrieve failed: ${response.status} ${JSON.stringify(body).slice(0, 500)}`);
+    }
+
+    for (const object of body.objects || []) {
+      if (object?.id) objects.set(object.id, object);
+    }
+  }
+
+  return objects;
+}
+
 export function isCatalogVersionUpdated(payload) {
   return payload?.type === 'catalog.version.updated';
 }
