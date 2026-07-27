@@ -79,42 +79,56 @@ export async function getSquareQuantitiesByCatalogObject({ config, catalogObject
   }
 
   const quantities = new Map(ids.map((id) => [id, 0]));
-  for (const batchIds of chunks(ids, 100)) {
-    let cursor;
-    do {
-      const body = {
-        catalog_object_ids: batchIds,
-        states: ['IN_STOCK'],
-      };
-      const effectiveLocationId = locationId || config.square.locationId;
-      if (effectiveLocationId) body.location_ids = [effectiveLocationId];
-      if (cursor) body.cursor = cursor;
+  const batchResults = await runWithConcurrency(
+    chunks(ids, 100),
+    squareInventoryBatchConcurrency(config),
+    (batchIds) => getSquareInventoryBatchQuantities({ config, batchIds, locationId })
+  );
 
-      const response = await squareFetch(`${config.square.apiBaseUrl}/v2/inventory/counts/batch-retrieve`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.square.accessToken}`,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'Square-Version': config.square.apiVersion || '2026-07-15',
-        },
-        body: JSON.stringify(body),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(`Square inventory batch retrieve failed: ${response.status} ${JSON.stringify(payload).slice(0, 500)}`);
-      }
-
-      for (const count of payload.counts || []) {
-        if (count.state !== 'IN_STOCK' || !count.catalog_object_id) continue;
-        const quantity = Math.max(0, Number.parseInt(count.quantity ?? '0', 10) || 0);
-        quantities.set(count.catalog_object_id, (quantities.get(count.catalog_object_id) || 0) + quantity);
-      }
-      cursor = payload.cursor;
-    } while (cursor);
+  for (const batchQuantities of batchResults) {
+    for (const [catalogObjectId, quantity] of batchQuantities) {
+      quantities.set(catalogObjectId, (quantities.get(catalogObjectId) || 0) + quantity);
+    }
   }
 
+  return quantities;
+}
+
+async function getSquareInventoryBatchQuantities({ config, batchIds, locationId }) {
+  const quantities = new Map();
+  let cursor;
+  do {
+    const body = {
+      catalog_object_ids: batchIds,
+      states: ['IN_STOCK'],
+    };
+    const effectiveLocationId = locationId || config.square.locationId;
+    if (effectiveLocationId) body.location_ids = [effectiveLocationId];
+    if (cursor) body.cursor = cursor;
+
+    const response = await squareFetch(`${config.square.apiBaseUrl}/v2/inventory/counts/batch-retrieve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.square.accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Square-Version': config.square.apiVersion || '2026-07-15',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`Square inventory batch retrieve failed: ${response.status} ${JSON.stringify(payload).slice(0, 500)}`);
+    }
+
+    for (const count of payload.counts || []) {
+      if (count.state !== 'IN_STOCK' || !count.catalog_object_id) continue;
+      const quantity = Math.max(0, Number.parseInt(count.quantity ?? '0', 10) || 0);
+      quantities.set(count.catalog_object_id, (quantities.get(count.catalog_object_id) || 0) + quantity);
+    }
+    cursor = payload.cursor;
+  } while (cursor);
   return quantities;
 }
 
@@ -225,6 +239,13 @@ function squareFetchTimeoutMs() {
   return Number.isFinite(value) && value > 0 ? value : 30000;
 }
 
+function squareInventoryBatchConcurrency(config) {
+  const configured = Number.parseInt(config.square.inventoryBatchConcurrency || "", 10);
+  const fromEnv = Number.parseInt(process.env.SQUARE_INVENTORY_BATCH_CONCURRENCY || "", 10);
+  const value = Number.isFinite(configured) ? configured : fromEnv;
+  return Math.max(1, Math.min(10, value || 5));
+}
+
 function isRetryableSquareStatus(status) {
   return status === 429 || status >= 500;
 }
@@ -298,4 +319,18 @@ function chunks(items, size) {
     groups.push(items.slice(index, index + size));
   }
   return groups;
+}
+
+async function runWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

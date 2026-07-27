@@ -259,3 +259,48 @@ test('times out and retries stalled Square requests', async () => {
     }
   }
 });
+
+test('retrieves Square inventory batches concurrently', async () => {
+  const previousFetch = globalThis.fetch;
+  let active = 0;
+  let maxActive = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    const body = JSON.parse(options.body);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    active -= 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        counts: body.catalog_object_ids.map((id) => ({
+          state: 'IN_STOCK',
+          catalog_object_id: id,
+          quantity: '1',
+        })),
+      }),
+    };
+  };
+
+  try {
+    const ids = Array.from({ length: 250 }, (_value, index) => `VAR${index}`);
+    const quantities = await getSquareQuantitiesByCatalogObject({
+      config: {
+        square: {
+          accessToken: 'token',
+          apiBaseUrl: 'https://connect.squareup.test',
+          apiVersion: '2026-07-15',
+          inventoryBatchConcurrency: 3,
+        },
+      },
+      catalogObjectIds: ids,
+    });
+
+    assert.equal(maxActive, 3);
+    assert.equal(quantities.size, 250);
+    assert.equal(quantities.get('VAR249'), 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
