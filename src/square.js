@@ -80,7 +80,7 @@ export async function getSquareQuantitiesByCatalogObject({ config, catalogObject
 
   const quantities = new Map(ids.map((id) => [id, 0]));
   const batchResults = await runWithConcurrency(
-    chunks(ids, 100),
+    chunks(ids, 1000),
     squareInventoryBatchConcurrency(config),
     (batchIds) => getSquareInventoryBatchQuantities({ config, batchIds, locationId })
   );
@@ -101,6 +101,7 @@ async function getSquareInventoryBatchQuantities({ config, batchIds, locationId 
     const body = {
       catalog_object_ids: batchIds,
       states: ['IN_STOCK'],
+      limit: 1000,
     };
     const effectiveLocationId = locationId || config.square.locationId;
     if (effectiveLocationId) body.location_ids = [effectiveLocationId];

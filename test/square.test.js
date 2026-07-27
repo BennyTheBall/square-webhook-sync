@@ -284,7 +284,7 @@ test('retrieves Square inventory batches concurrently', async () => {
   };
 
   try {
-    const ids = Array.from({ length: 250 }, (_value, index) => `VAR${index}`);
+    const ids = Array.from({ length: 2500 }, (_value, index) => `VAR${index}`);
     const quantities = await getSquareQuantitiesByCatalogObject({
       config: {
         square: {
@@ -298,8 +298,8 @@ test('retrieves Square inventory batches concurrently', async () => {
     });
 
     assert.equal(maxActive, 3);
-    assert.equal(quantities.size, 250);
-    assert.equal(quantities.get('VAR249'), 1);
+    assert.equal(quantities.size, 2500);
+    assert.equal(quantities.get('VAR2499'), 1);
   } finally {
     globalThis.fetch = previousFetch;
   }
