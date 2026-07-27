@@ -169,7 +169,45 @@ test('upsertCatalogVariation ignores description segment in four-part clothing v
   assert.equal(tempInsert.params.Style, 'Sleeveless Shirt');
 });
 
-test('upsertCatalogVariation parses variation details only for Clothing category', async () => {
+test('upsertCatalogVariation parses variation details for Childrens Clothing category', async () => {
+  const statements = [];
+  const db = {
+    execute: async (sql, params = {}) => {
+      statements.push({ sql, params });
+      if (sql.includes('SELECT *') && sql.includes('SKU_Temp')) return [[]];
+      if (sql.includes('SELECT *') && sql.includes('SKU')) return [[]];
+      return [{}];
+    },
+  };
+
+  await upsertCatalogVariation(db, {
+    skuTemp: 'SKU_Temp',
+    skuMain: 'SKU',
+    skuHistory: 'SKU_History',
+  }, {
+    token: 'VAR-CHILDRENS-CLOTHING',
+    itemName: 'Childrens Clothing Item',
+    description: '',
+    category: 'Childrens Clothing',
+    sku: '123456789018',
+    gtin: '',
+    variationName: '12-24,Multi Color,LS Deer to My Heart,U23-0502A12-24',
+    price: '10.99',
+    cost: '5.10',
+    vendor: 'Vendor',
+    quantity: 7,
+    alertEnabled: 'N',
+    alertCount: null,
+    tax: 'Y',
+  }, new Date('2026-07-26T23:18:59Z'));
+
+  const tempInsert = statements.find((statement) => statement.sql.includes('INSERT INTO `SKU_Temp`'));
+  assert.equal(tempInsert.params.Size, '12-24');
+  assert.equal(tempInsert.params.Color, 'Multi Color');
+  assert.equal(tempInsert.params.Style, 'U23-0502A12-24');
+});
+
+test('upsertCatalogVariation parses variation details only for clothing detail categories', async () => {
   const statements = [];
   const db = {
     execute: async (sql, params = {}) => {
@@ -189,7 +227,7 @@ test('upsertCatalogVariation parses variation details only for Clothing category
     itemName: 'Non Clothing Item',
     description: '',
     category: 'Body',
-    sku: '123456789018',
+    sku: '123456789019',
     gtin: '',
     variationName: 'NS,NC,Mimic',
     price: '10.99',

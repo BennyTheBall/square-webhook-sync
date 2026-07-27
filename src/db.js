@@ -383,9 +383,10 @@ export async function listChangedCatalogReconciliationStage(db, tables, runDate)
   const tempTable = escapeId(tables.skuTemp || tables.sku);
   const mainTable = escapeId(tables.skuMain || "SKU");
   const commaCount = "(CHAR_LENGTH(COALESCE(s.variation_name, '')) - CHAR_LENGTH(REPLACE(COALESCE(s.variation_name, ''), ',', '')))";
-  const parsedSize = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', 1)), 20) ELSE '' END`;
-  const parsedColor = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.variation_name, ',', 2), ',', -1)), 50) ELSE '' END`;
-  const parsedStyle = `CASE WHEN s.category = 'Clothing' AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', -1)), 50) ELSE '' END`;
+  const detailCategory = "s.category IN ('Clothing', 'Childrens Clothing')";
+  const parsedSize = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', 1)), 20) ELSE '' END`;
+  const parsedColor = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.variation_name, ',', 2), ',', -1)), 50) ELSE '' END`;
+  const parsedStyle = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', -1)), 50) ELSE '' END`;
   const tempChanged = `
     t.ID IS NULL
     OR NOT (t.Token <=> s.token)
@@ -739,7 +740,7 @@ function catalogValuesEqual(left, right) {
 
 function parseVariationParts(variationName, category) {
   const emptyParts = { size: "", color: "", style: "" };
-  if (category !== "Clothing") return emptyParts;
+  if (!isDetailCategory(category)) return emptyParts;
 
   const normalizedName = String(variationName || "");
   const commaCount = (normalizedName.match(/,/g) || []).length;
@@ -751,6 +752,10 @@ function parseVariationParts(variationName, category) {
     color: clampCatalogDetail(parts[1].trim(), 50),
     style: clampCatalogDetail(parts[commaCount].trim(), 50),
   };
+}
+
+function isDetailCategory(category) {
+  return category === "Clothing" || category === "Childrens Clothing";
 }
 
 function clampCatalogDetail(value, maxLength) {
