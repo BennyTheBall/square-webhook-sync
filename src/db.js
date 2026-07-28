@@ -384,6 +384,12 @@ export async function listChangedCatalogReconciliationStage(db, tables, runDate)
   const mainTable = escapeId(tables.skuMain || "SKU");
   const commaCount = "(CHAR_LENGTH(COALESCE(s.variation_name, '')) - CHAR_LENGTH(REPLACE(COALESCE(s.variation_name, ''), ',', '')))";
   const detailCategory = "s.category IN ('Clothing', 'Childrens Clothing')";
+  const validActiveCatalogRecord = `
+    NULLIF(s.sku, '') IS NOT NULL
+    AND NULLIF(s.item_name, '') IS NOT NULL
+    AND NULLIF(s.category, '') IS NOT NULL
+    AND s.price IS NOT NULL
+    AND s.cost IS NOT NULL`;
   const parsedSize = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', 1)), 20) ELSE '' END`;
   const parsedColor = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.variation_name, ',', 2), ',', -1)), 50) ELSE '' END`;
   const parsedStyle = `CASE WHEN ${detailCategory} AND ${commaCount} IN (2, 3) THEN LEFT(TRIM(SUBSTRING_INDEX(s.variation_name, ',', -1)), 50) ELSE '' END`;
@@ -442,6 +448,7 @@ export async function listChangedCatalogReconciliationStage(db, tables, runDate)
           )
           OR (
             s.deleted = 0
+            AND ${validActiveCatalogRecord}
             AND (
               ${tempChanged}
               OR ${mainChanged}
@@ -530,9 +537,9 @@ export async function upsertCatalogVariation(db, tables, variation, changedAt) {
   if (variation.cost == null) requiredMissing.push("Cost");
   if (requiredMissing.length) {
     return {
-      status: "failed",
+      status: "skipped",
       changed: false,
-      message: `Missing required Square catalog fields: ${requiredMissing.join(", ")}`
+      message: `Skipped Square catalog record missing required fields: ${requiredMissing.join(", ")}`
     };
   }
 

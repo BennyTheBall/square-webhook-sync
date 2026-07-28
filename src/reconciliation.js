@@ -40,6 +40,7 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
     alreadyCurrent: 0,
     squareDeleted: 0,
     missingDeleted: 0,
+    invalidSquareRecords: 0,
     failed: 0,
     pages: 0,
     squareApiCalls: {
@@ -87,6 +88,9 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
         stats.squareRecords += 1;
         if (!variation.deleted) {
           variation.quantity = quantities.get(variation.token) || 0;
+          if (missingRequiredCatalogFields(variation).length) {
+            stats.invalidSquareRecords += 1;
+          }
         }
       }
 
@@ -94,14 +98,18 @@ export async function runCatalogReconciliation({ db, config, runDate, timezone =
       stats.stagedRecords += stageResult?.inserted ?? variations.length;
     }
 
-    const stagedVariations = await (
+    const candidateVariations = await (
       db.listChangedCatalogReconciliationStage
         ? db.listChangedCatalogReconciliationStage(runDate)
         : db.listCatalogReconciliationStage?.(runDate)
     ) || [];
+    const stagedVariations = candidateVariations.filter((variation) =>
+      variation.deleted || missingRequiredCatalogFields(variation).length === 0
+    );
     logger.info("Square catalog reconciliation apply started", {
       runDate,
       stagedRecords: stats.stagedRecords,
+      candidateRecords: candidateVariations.length,
       recordsNeedingApply: stagedVariations.length,
     });
     await db.markReconciliationRun?.({
@@ -334,6 +342,7 @@ export function buildReconciliationText({ runDate, timezone, stats, error = null
     `Already current: ${stats.alreadyCurrent}`,
     `Deleted from Square: ${stats.squareDeleted}`,
     `Missing locally marked deleted: ${stats.missingDeleted}`,
+    `Skipped invalid Square records: ${stats.invalidSquareRecords ?? 0}`,
     `Failures: ${stats.failed}`,
     "",
     "Sample changes:",
@@ -365,6 +374,7 @@ export function buildReconciliationHtml({ runDate, timezone, stats, error = null
         ${summaryRow("Already current", stats.alreadyCurrent)}
         ${summaryRow("Deleted from Square", stats.squareDeleted)}
         ${summaryRow("Missing locally marked deleted", stats.missingDeleted)}
+        ${summaryRow("Skipped invalid Square records", stats.invalidSquareRecords ?? 0)}
         ${summaryRow("Failures", stats.failed)}
       </tbody>
     </table>
@@ -383,6 +393,16 @@ function addSample(stats, sample) {
 
 function addError(stats, message) {
   if (stats.errors.length < 50) stats.errors.push(message);
+}
+
+function missingRequiredCatalogFields(variation) {
+  const missing = [];
+  if (!variation.sku) missing.push("SKU");
+  if (!variation.itemName) missing.push("ItemName");
+  if (!variation.category) missing.push("Cat");
+  if (variation.price == null) missing.push("Price");
+  if (variation.cost == null) missing.push("Cost");
+  return missing;
 }
 
 function formatSamples(samples) {

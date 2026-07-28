@@ -73,6 +73,15 @@ test("runCatalogReconciliation processes Square pages and missing local deletes"
             price_money: { amount: 1099, currency: "USD" },
             vendor_information: [{ vendor_id: "VENDOR", unit_cost_money: { amount: 510, currency: "USD" } }],
           },
+        }, {
+          type: "ITEM_VARIATION",
+          id: "VAR-BAD",
+          updated_at: "2026-07-26T11:00:00Z",
+          item_variation_data: {
+            item_id: "ITEM-BAD",
+            name: "Regular",
+            sku: "",
+          },
         }],
         related_objects: [{
           type: "ITEM",
@@ -86,6 +95,13 @@ test("runCatalogReconciliation processes Square pages and missing local deletes"
           type: "CATEGORY",
           id: "CAT123",
           category_data: { name: "Body" },
+        }, {
+          type: "ITEM",
+          id: "ITEM-BAD",
+          item_data: {
+            name: "Ship Order",
+            category_id: "CAT123",
+          },
         }],
       });
     }
@@ -130,11 +146,13 @@ test("runCatalogReconciliation processes Square pages and missing local deletes"
 
     assert.equal(result.ran, true);
     assert.equal(result.status, "completed");
-    assert.equal(staged.length, 1);
+    assert.equal(staged.length, 2);
+    assert.equal(upserts.length, 1);
     assert.equal(upserts[0].sku, "123456789012");
     assert.equal(upserts[0].quantity, 9);
     assert.deepEqual(deleted.map((record) => record.Token), ["MISSING123"]);
-    assert.equal(result.stats.squareRecords, 1);
+    assert.equal(result.stats.squareRecords, 2);
+    assert.equal(result.stats.invalidSquareRecords, 1);
     assert.equal(result.stats.missingDeleted, 1);
     assert.equal(calls.some((call) => call.mail === "Square Catalog Reconciliation Complete - 2026-07-26"), true);
   } finally {
