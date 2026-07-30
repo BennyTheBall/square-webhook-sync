@@ -24,6 +24,14 @@ function normalize(value) {
   return String(value || "").trim();
 }
 
+function lookupCandidates(value) {
+  const normalized = normalize(value);
+  if (!normalized) return [];
+  const candidates = [normalized];
+  if (!normalized.startsWith("0")) candidates.push(`0${normalized}`);
+  return candidates;
+}
+
 function nwtConfigFromPhp() {
   const code = `
     require ${JSON.stringify(NAS_CONFIG)};
@@ -149,7 +157,7 @@ function currentAvailable(variant) {
 }
 
 function resolveMatch(variant, skuMatches) {
-  const keys = [variant.barcode, variant.sku].map(normalize).filter(Boolean);
+  const keys = [variant.barcode, variant.sku].flatMap(lookupCandidates);
   const seen = new Map();
   for (const key of keys) {
     for (const row of skuMatches.get(key) || []) seen.set(row.Token, row);
@@ -200,7 +208,7 @@ async function main() {
 
   const variants = (await loadVariants(nwt, token, location.id))
     .filter((variant) => !ACTIVE_ONLY || variant.product?.status === "ACTIVE");
-  const lookupValues = variants.flatMap((variant) => [variant.barcode, variant.sku]);
+  const lookupValues = variants.flatMap((variant) => [variant.barcode, variant.sku].flatMap(lookupCandidates));
   const skuMatches = await loadSkuMatches(db, lookupValues);
   await db.end();
 

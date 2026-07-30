@@ -83,15 +83,28 @@ function escapeSearchValue(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+function searchCandidates(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return [];
+  const candidates = [normalized];
+  if (!normalized.startsWith('0')) {
+    candidates.push(`0${normalized}`);
+  }
+  return candidates;
+}
+
 export async function findShopifyInventoryItem(store, db, skuRecord, excludeInventoryItemId = null) {
   const searchValue = skuRecord.SKU || skuRecord.Sku || skuRecord.Barcode || skuRecord.Code;
   if (!searchValue) {
     return null;
   }
 
+  const candidates = searchCandidates(searchValue);
   const queryText = store.variantQueryTemplate
     ? store.variantQueryTemplate.replace('{sku}', escapeSearchValue(searchValue))
-    : `barcode:"${escapeSearchValue(searchValue)}" OR sku:"${escapeSearchValue(searchValue)}"`;
+    : candidates
+      .flatMap((candidate) => [`barcode:"${escapeSearchValue(candidate)}"`, `sku:"${escapeSearchValue(candidate)}"`])
+      .join(' OR ');
 
   const data = await shopifyGraphql(
     store,
