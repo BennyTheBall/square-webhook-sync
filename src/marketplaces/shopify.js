@@ -1,6 +1,7 @@
-import { refreshOfflineToken, shopDomain, tokenExpiryDate } from '../shopifyAuth.js';
+import { exchangeClientCredentials, refreshOfflineToken, shopDomain, tokenExpiryDate } from '../shopifyAuth.js';
 
 const GRAPHQL_PATH = '/admin/api/{version}/graphql.json';
+const clientCredentialsCache = new Map();
 
 function shopifyUrl(store, path = GRAPHQL_PATH) {
   const domain = store.domain?.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -10,6 +11,10 @@ function shopifyUrl(store, path = GRAPHQL_PATH) {
 async function getAccessToken(store, db) {
   if (store.accessMethod === 'admin_token') {
     return store.accessToken;
+  }
+
+  if (store.accessMethod === 'client_credentials') {
+    return getClientCredentialsToken(store);
   }
 
   const saved = await db.getShopifyToken?.(store.key);
@@ -37,6 +42,18 @@ async function getAccessToken(store, db) {
     scope: refreshed.scope,
   });
   return refreshed.access_token;
+}
+
+async function getClientCredentialsToken(store) {
+  const cached = clientCredentialsCache.get(store.key);
+  if (cached?.accessToken && (!cached.expiresAt || cached.expiresAt.getTime() > Date.now() + 60_000)) {
+    return cached.accessToken;
+  }
+
+  const token = await exchangeClientCredentials(store);
+  const expiresAt = tokenExpiryDate(token.expires_in, 60);
+  clientCredentialsCache.set(store.key, { accessToken: token.access_token, expiresAt });
+  return token.access_token;
 }
 
 async function shopifyGraphql(store, db, query, variables) {
@@ -130,6 +147,11 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId, id
 }
 
 export async function setShopifyInventory(store, db, inventoryItemId, quantity, idempotencyKey) {
+  if (usesLegacyInventorySetQuantities(store.apiVersion)) {
+    await setShopifyInventoryLegacy(store, db, inventoryItemId, quantity);
+    return;
+  }
+
   const data = await shopifyGraphql(
     store,
     db,
@@ -160,6 +182,45 @@ export async function setShopifyInventory(store, db, inventoryItemId, quantity, 
   if (errors.length) {
     throw new Error(`Shopify ${store.key} inventorySetQuantities failed: ${errors.map((error) => error.message).join('; ')}`);
   }
+}
+
+async function setShopifyInventoryLegacy(store, db, inventoryItemId, quantity) {
+  const data = await shopifyGraphql(
+    store,
+    db,
+    `mutation SetInventory($input: InventorySetQuantitiesInput!) {
+      inventorySetQuantities(input: $input) {
+        inventoryAdjustmentGroup { createdAt reason }
+        userErrors { field message }
+      }
+    }`,
+    {
+      input: {
+        name: 'available',
+        reason: 'correction',
+        ignoreCompareQuantity: true,
+        quantities: [
+          {
+            inventoryItemId,
+            locationId: store.locationId,
+            quantity,
+          },
+        ],
+      },
+    },
+  );
+
+  const errors = data.inventorySetQuantities?.userErrors || [];
+  if (errors.length) {
+    throw new Error(`Shopify ${store.key} inventorySetQuantities failed: ${errors.map((error) => error.message).join('; ')}`);
+  }
+}
+
+function usesLegacyInventorySetQuantities(apiVersion) {
+  const match = String(apiVersion || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return false;
+  const numericVersion = Number(match[1]) * 100 + Number(match[2]);
+  return numericVersion < 202601;
 }
 
 export async function syncShopifyStore({ store, db, skuRecord, quantity, eventId }) {

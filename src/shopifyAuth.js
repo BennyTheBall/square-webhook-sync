@@ -112,6 +112,14 @@ export async function refreshOfflineToken(store, refreshToken) {
   });
 }
 
+export async function exchangeClientCredentials(store) {
+  return requestShopifyToken(store, {
+    client_id: store.clientId,
+    client_secret: store.clientSecret,
+    grant_type: 'client_credentials',
+  });
+}
+
 export function tokenExpiryDate(secondsFromNow, skewSeconds = 60) {
   if (!secondsFromNow) {
     return null;
