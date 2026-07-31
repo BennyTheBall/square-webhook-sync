@@ -43,6 +43,15 @@ function getCurrentQuantity(skuRecord) {
   return Number.parseInt(skuRecord.Quantity ?? skuRecord.quantity ?? '0', 10) || 0;
 }
 
+function dedupeInventoryCounts(counts) {
+  const deduped = new Map();
+  for (const count of counts) {
+    const key = `${count.catalogObjectId || ''}:${count.locationId || ''}`;
+    deduped.set(key, count);
+  }
+  return [...deduped.values()];
+}
+
 function resultMessage(result, quantity) {
   return result.message || `set to ${result.quantity ?? quantity}`;
 }
@@ -159,7 +168,7 @@ export async function processSquareEvent({ db, config, eventId, payload }) {
     return processCatalogEvent({ db, config, eventId, payload });
   }
 
-  const counts = extractInventoryCounts(payload);
+  const counts = dedupeInventoryCounts(extractInventoryCounts(payload));
   const failures = [];
   let processedCount = 0;
 
