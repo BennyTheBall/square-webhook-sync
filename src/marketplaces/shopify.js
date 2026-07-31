@@ -133,6 +133,10 @@ export async function findShopifyInventoryItem(store, db, skuRecord, excludeInve
 }
 
 export async function activateInventoryAtLocation(store, db, inventoryItemId, idempotencyKey) {
+  if (usesLegacyInventorySetQuantities(store.apiVersion)) {
+    return activateInventoryAtLocationLegacy(store, db, inventoryItemId);
+  }
+
   const data = await shopifyGraphql(
     store,
     db,
@@ -143,6 +147,33 @@ export async function activateInventoryAtLocation(store, db, inventoryItemId, id
       }
     }`,
     { inventoryItemId, locationId: store.locationId, idempotencyKey },
+  );
+
+  const errors = data.inventoryActivate?.userErrors || [];
+  if (errors.length) {
+    const ignorable = errors.every((error) => /already active/i.test(error.message || ''));
+    if (!ignorable) {
+      const deleted = errors.some((error) => /product (was|is) deleted|couldn'?t be stocked/i.test(error.message || ''));
+      if (deleted) {
+        return { skipped: true, staleInventoryItem: true, message: errors.map((error) => error.message).join('; ') };
+      }
+      throw new Error(`Shopify ${store.key} inventoryActivate failed: ${errors.map((error) => error.message).join('; ')}`);
+    }
+  }
+  return { skipped: false };
+}
+
+async function activateInventoryAtLocationLegacy(store, db, inventoryItemId) {
+  const data = await shopifyGraphql(
+    store,
+    db,
+    `mutation ActivateInventory($inventoryItemId: ID!, $locationId: ID!) {
+      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+        inventoryLevel { id }
+        userErrors { field message }
+      }
+    }`,
+    { inventoryItemId, locationId: store.locationId },
   );
 
   const errors = data.inventoryActivate?.userErrors || [];

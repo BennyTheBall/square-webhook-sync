@@ -836,24 +836,46 @@ export async function recordSyncResult(
   status,
   message
 ) {
+  const values = {
+    eventId,
+    sku,
+    squareCatalogObjectId,
+    itemName: itemName || null,
+    variantName: variantName || null,
+    vendor: vendor || null,
+    quantity: quantity ?? null,
+    marketplace,
+    target,
+    status,
+    message: String(message || "").slice(0, 5000)
+  };
+
+  const [updated] = await db.execute(
+    `UPDATE square_inventory_sync_results
+        SET sku = :sku,
+            item_name = :itemName,
+            variant_name = :variantName,
+            vendor = :vendor,
+            quantity = :quantity,
+            target = :target,
+            status = :status,
+            message = :message
+      WHERE event_id = :eventId
+        AND marketplace = :marketplace
+        AND square_catalog_object_id <=> :squareCatalogObjectId
+      LIMIT 1`,
+    values
+  );
+  if (updated.affectedRows > 0) {
+    return;
+  }
+
   await db.execute(
     `INSERT INTO square_inventory_sync_results
        (event_id, sku, square_catalog_object_id, item_name, variant_name, vendor, quantity, marketplace, target, status, message)
      VALUES
        (:eventId, :sku, :squareCatalogObjectId, :itemName, :variantName, :vendor, :quantity, :marketplace, :target, :status, :message)`,
-    {
-      eventId,
-      sku,
-      squareCatalogObjectId,
-      itemName: itemName || null,
-      variantName: variantName || null,
-      vendor: vendor || null,
-      quantity: quantity ?? null,
-      marketplace,
-      target,
-      status,
-      message: String(message || "").slice(0, 5000)
-    }
+    values
   );
 }
 
