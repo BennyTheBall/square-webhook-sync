@@ -74,7 +74,7 @@ test("buildSummaryMessage includes totals, failures, and service table rows", ()
     }
   });
 
-  assert.match(message, /Totals: 2 events, 1 products, 3 marketplace\/database updates/);
+  assert.match(message, /Totals: 2 inventory events, 1 products, 3 inventory sync updates/);
   assert.match(message, /SKU\s+\| Desc\s+\| Qty\s+\| Date\s+\| Time\s+\| DB\s+\| Strawberry\s+\| NWT\s+\| Walmart\s+\| Amazon/);
   assert.match(message, /718806010009\s+\| Test Item \| Large \| Vendor\s+\| 2\s+\| 2026-07-19\s+\| 11:32:00\s+\| yes\s+\| no\s+\|\s+\| skip/);
   assert.match(message, /shopify:strawberry: failed set to 2 718806010009 \| Test Item details=Shopify error/);

@@ -954,10 +954,16 @@ export async function markDailySummaryEmail(db, result) {
 
 export async function getDailySummary(db, { startUtc, endUtc }) {
   const params = { startUtc, endUtc };
+  const inventoryResultFilter = `
+        AND marketplace <> 'local-catalog'
+        AND quantity IS NOT NULL
+        AND sku IS NOT NULL
+        AND sku <> ''`;
   const [events] = await db.execute(
     `SELECT status, COUNT(*) AS count
        FROM square_webhook_events
       WHERE received_at >= :startUtc AND received_at < :endUtc
+        AND event_type = 'inventory.count.updated'
       GROUP BY status
       ORDER BY status`,
     params
@@ -966,6 +972,7 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
     `SELECT marketplace, status, COUNT(*) AS count
        FROM square_inventory_sync_results
       WHERE created_at >= :startUtc AND created_at < :endUtc
+        ${inventoryResultFilter}
       GROUP BY marketplace, status
       ORDER BY marketplace, status`,
     params
@@ -975,7 +982,8 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
             COUNT(DISTINCT event_id) AS event_count,
             COUNT(*) AS result_count
        FROM square_inventory_sync_results
-      WHERE created_at >= :startUtc AND created_at < :endUtc`,
+      WHERE created_at >= :startUtc AND created_at < :endUtc
+        ${inventoryResultFilter}`,
     params
   );
   const [failures] = await db.execute(
@@ -983,6 +991,7 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
             marketplace, status, message, created_at
        FROM square_inventory_sync_results
       WHERE created_at >= :startUtc AND created_at < :endUtc
+        ${inventoryResultFilter}
         AND status = 'failed'
       ORDER BY created_at DESC
       LIMIT 25`,
@@ -993,6 +1002,7 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
             marketplace, status, message, created_at
        FROM square_inventory_sync_results
       WHERE created_at >= :startUtc AND created_at < :endUtc
+        ${inventoryResultFilter}
       ORDER BY created_at DESC
       LIMIT 25`,
     params
@@ -1002,6 +1012,7 @@ export async function getDailySummary(db, { startUtc, endUtc }) {
             marketplace, status, message, created_at
        FROM square_inventory_sync_results
       WHERE created_at >= :startUtc AND created_at < :endUtc
+        ${inventoryResultFilter}
       ORDER BY created_at DESC
       LIMIT 1000`,
     params

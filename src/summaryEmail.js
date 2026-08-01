@@ -90,9 +90,9 @@ export function buildSummaryMessage({ summaryDate, timezone, range, summary }) {
     `Date: ${summaryDate} (${timezone})`,
     `Window: ${formatDateTime(range.startUtc, timezone)} to ${formatDateTime(range.endUtc, timezone)}`,
     "",
-    `Totals: ${Number(product.event_count || 0)} events, ${Number(product.sku_count || 0)} products, ${Number(product.result_count || 0)} marketplace/database updates`,
+    `Totals: ${Number(product.event_count || 0)} inventory events, ${Number(product.sku_count || 0)} products, ${Number(product.result_count || 0)} inventory sync updates`,
     "",
-    "Square webhook events:",
+    "Square inventory webhook events:",
     ...formatCounts(summary.events, "status"),
     "",
     "Sync results:",
@@ -118,9 +118,9 @@ export function buildSummaryHtml({ summaryDate, timezone, range, summary }) {
     <p style="margin: 0 0 12px;">
       <strong>Date:</strong> ${escapeHtml(summaryDate)} (${escapeHtml(timezone)})<br>
       <strong>Window:</strong> ${escapeHtml(formatDateTime(range.startUtc, timezone))} to ${escapeHtml(formatDateTime(range.endUtc, timezone))}<br>
-      <strong>Totals:</strong> ${Number(product.event_count || 0)} events, ${Number(product.sku_count || 0)} products, ${Number(product.result_count || 0)} marketplace/database updates
+      <strong>Totals:</strong> ${Number(product.event_count || 0)} inventory events, ${Number(product.sku_count || 0)} products, ${Number(product.result_count || 0)} inventory sync updates
     </p>
-    ${htmlCounts("Square webhook events", summary.events, "status")}
+    ${htmlCounts("Square inventory webhook events", summary.events, "status")}
     ${htmlMarketplaceCounts("Sync results", summary.results)}
     <h3 style="margin: 16px 0 8px;">Sync Activity</h3>
     ${htmlActivityTable(activity)}
